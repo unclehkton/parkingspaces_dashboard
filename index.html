@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hong Kong Carpark Monitor 香港泊車監察</title>
+  <meta name="description" content="Real-time parking vacancy data for Hong Kong carparks and metered spaces.">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@300;400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="accent-bar" aria-hidden="true"></div>
+
+  <div id="setup-message" class="setup-message" role="alert" hidden>
+    <div class="setup-card">
+      <h1>⚙️ Setup Required</h1>
+      <p>Supabase credentials have not been configured yet.</p>
+      <p>The API placeholders need to be replaced by the CI/CD pipeline.</p>
+      <p class="setup-hint">Check your GitHub Actions workflow for the substitution step.</p>
+    </div>
+  </div>
+
+  <div id="app" class="app-shell" hidden>
+    <header class="header" role="banner">
+      <div class="header-inner">
+        <div class="header-titles">
+          <h1 class="header-title-tc">泊車監察</h1>
+          <h1 class="header-title-en">Carpark Monitor</h1>
+        </div>
+        <div class="header-sync" aria-live="polite">
+          <span id="sync-label" class="sync-label">Synced: —</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar" id="sidebar" role="navigation" aria-label="Section list">
+        <div class="sidebar-filters">
+          <div class="type-tabs" role="tablist" aria-label="Section type">
+            <button class="type-tab active" role="tab" aria-selected="true" data-type="carpark">Carpark</button>
+            <button class="type-tab" role="tab" aria-selected="false" data-type="metered">Metered</button>
+          </div>
+          <div class="filter-row">
+            <select id="district-select" class="district-select" aria-label="Filter by district">
+              <option value="">All Districts 全部地區</option>
+            </select>
+          </div>
+          <div class="filter-row">
+            <input type="search" id="search-input" class="search-input" placeholder="Search 搜尋..." aria-label="Search sections by name">
+          </div>
+          <div class="results-count" id="results-count" aria-live="polite">0 sections</div>
+        </div>
+        <ul class="section-list" id="section-list" role="listbox" aria-label="Parking sections"></ul>
+      </aside>
+
+      <section class="detail-panel" id="detail-panel" role="region" aria-label="Section detail" aria-live="polite">
+        <div class="detail-placeholder" id="detail-placeholder">
+          <div class="placeholder-icon" aria-hidden="true">📊</div>
+          <p class="placeholder-text-tc">選擇一個停車場以查看數據</p>
+          <p class="placeholder-text-en">Select a section to view data</p>
+        </div>
+
+        <div class="detail-content" id="detail-content" hidden>
+          <button class="back-btn" id="back-btn" aria-label="Back to list">← Back</button>
+          <div class="detail-header">
+            <h2 class="detail-name-tc" id="detail-name-tc"></h2>
+            <h3 class="detail-name-en" id="detail-name-en"></h3>
+            <div class="detail-meta" id="detail-meta"></div>
+          </div>
+          <div class="day-toggles" role="group" aria-label="Day type toggles">
+            <button class="day-toggle active" data-day="weekday" aria-pressed="true">
+              <span class="toggle-dot weekday-dot" aria-hidden="true"></span> Mon–Fri
+            </button>
+            <button class="day-toggle active" data-day="saturday" aria-pressed="true">
+              <span class="toggle-dot saturday-dot" aria-hidden="true"></span> Saturday
+            </button>
+            <button class="day-toggle active" data-day="sunday" aria-pressed="true">
+              <span class="toggle-dot sunday-dot" aria-hidden="true"></span> Sunday
+            </button>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="vacancy-chart" aria-label="Vacancy chart by hour"></canvas>
+          </div>
+        </div>
+
+        <div class="detail-loading" id="detail-loading" hidden>
+          <div class="spinner" aria-hidden="true"></div>
+          <p>Loading data…</p>
+        </div>
+
+        <div class="detail-nodata" id="detail-nodata" hidden>
+          <p class="nodata-tc">此區段暫無數據</p>
+          <p class="nodata-en">No typical-week data available for this section.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer" role="contentinfo">
+      <p>Data source: Transport Department, the Government of the Hong Kong Special Administrative Region</p>
+      <p>數據來源：香港特別行政區政府運輸署</p>
+      <p class="footer-powered">Powered by Supabase</p>
+    </footer>
+  </div>
+
+  <!-- Mobile overlay backdrop -->
+  <div class="overlay-backdrop" id="overlay-backdrop" hidden aria-hidden="true"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
