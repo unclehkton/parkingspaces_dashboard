@@ -13,21 +13,12 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
   <div class="accent-bar" aria-hidden="true"></div>
 
-  <div id="setup-message" class="setup-message" role="alert" hidden>
-    <div class="setup-card">
-      <h1>⚙️ Setup Required</h1>
-      <p>Supabase credentials have not been configured yet.</p>
-      <p>The API placeholders need to be replaced by the CI/CD pipeline.</p>
-      <p class="setup-hint">Check your GitHub Actions workflow for the substitution step.</p>
-    </div>
-  </div>
-
-  <div id="app" class="app-shell" hidden>
+  <div id="app" class="app-shell">
     <header class="header" role="banner">
       <div class="header-inner">
         <div class="header-titles">
@@ -112,6 +103,6 @@
   <!-- Mobile overlay backdrop -->
   <div class="overlay-backdrop" id="overlay-backdrop" hidden aria-hidden="true"></div>
 
-  <script src="app.js?v=2"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
