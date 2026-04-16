@@ -108,17 +108,24 @@
       html += '<span class="info-label">' + escapeHtml(label) + '</span>' +
               '<span class="info-value">' + value + '</span>';
     }
-    row('Address 地址', escapeHtml(info.displayAddress_tc));
+    row('地址', escapeHtml(info.displayAddress_tc));
     row('Address', escapeHtml(info.displayAddress_en));
-    if (info.contactNo) row('Contact 聯絡', escapeHtml(info.contactNo));
-    if (info.height && info.height > 0) row('Height Limit', info.height + 'm');
-    if (info.opening_status) row('Status', escapeHtml(info.opening_status));
+    if (info.contactNo) row('聯絡 Contact', escapeHtml(info.contactNo));
+    if (info.height && info.height > 0) row('高度限制 Height', info.height + 'm');
+    if (info.opening_status) row('狀態 Status', escapeHtml(info.opening_status));
     if (info.website_en) {
-      row('Website', '<a href="' + escapeHtml(info.website_en) + '" target="_blank" rel="noopener">' +
+      row('網站 Website', '<a href="' + escapeHtml(info.website_en) + '" target="_blank" rel="noopener">' +
         escapeHtml(new URL(info.website_en).hostname) + '</a>');
     }
-    const remark = stripHtml((info.remark_en || '').replace(/^Height Limit:\s*/i, '').trim());
-    if (remark) row('Remark', escapeHtml(remark));
+    const remarkTc = stripHtml((info.remark_tc || '').replace(/^高度限制[:：]\s*/i, '').trim());
+    const remarkEn = stripHtml((info.remark_en || '').replace(/^Height Limit:\s*/i, '').trim());
+    if (remarkTc || remarkEn) {
+      let remarkHtml = '';
+      if (remarkTc) remarkHtml += escapeHtml(remarkTc);
+      if (remarkTc && remarkEn) remarkHtml += '<br>';
+      if (remarkEn) remarkHtml += '<span style="opacity:0.7;font-size:0.9em">' + escapeHtml(remarkEn) + '</span>';
+      row('備註 Remark', remarkHtml);
+    }
 
     detailInfoGrid.innerHTML = html;
   }
