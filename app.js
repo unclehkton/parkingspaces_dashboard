@@ -5,6 +5,7 @@
   /* ===== Configuration ===== */
   const SUPABASE_URL = 'https://mexlfgaxipmfvoavmxra.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1leGxmZ2F4aXBtZnZvYXZteHJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzA5MDAsImV4cCI6MjA5MTkwNjkwMH0.m8-RBCfkF-U-Rxc_b3WeqJkoDFeEFdgoZhYa3xAFkwg';
+  const TD_BASIC_INFO_URL = 'https://resource.data.one.gov.hk/td/carpark/basic_info_all.json';
 
   /* ===== Supabase Client ===== */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -18,8 +19,9 @@
   let searchTerm = '';
   let selectedSectionId = null;
   const dataCache = new Map();
+  const tdInfoMap = new Map();
   let chart = null;
-  let dayVisibility = { weekday: true, saturday: true, sunday: true };
+  let dayVisibility = { weekday: true, saturday: false, sunday: false };
   let searchTimer = null;
 
   /* ===== DOM References ===== */
@@ -39,6 +41,9 @@
   const detailNameEn = $('#detail-name-en');
   const detailMeta = $('#detail-meta');
   const detailPanel = $('#detail-panel');
+  const detailInfo = $('#detail-info');
+  const detailPhoto = $('#detail-photo');
+  const detailInfoGrid = $('#detail-info-grid');
   const backBtn = $('#back-btn');
   const overlayBackdrop = $('#overlay-backdrop');
   const chartCanvas = $('#vacancy-chart');
@@ -58,6 +63,59 @@
     const d = document.createElement('div');
     d.textContent = s || '';
     return d.innerHTML;
+  }
+
+  /* ===== TD Basic Info ===== */
+  async function fetchTdBasicInfo() {
+    try {
+      const resp = await fetch(TD_BASIC_INFO_URL);
+      const text = await resp.text();
+      const clean = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+      const data = JSON.parse(clean);
+      (data.car_park || []).forEach(cp => tdInfoMap.set(cp.park_id, cp));
+    } catch (err) {
+      console.warn('TD basic info fetch failed:', err);
+    }
+  }
+
+  function renderTdInfo(sectionId) {
+    const info = tdInfoMap.get(sectionId);
+    if (!info) {
+      detailInfo.hidden = true;
+      return;
+    }
+    detailInfo.hidden = false;
+
+    /* Photo */
+    if (info.carpark_photo) {
+      detailPhoto.src = info.carpark_photo.replace('http://', 'https://');
+      detailPhoto.alt = (info.name_en || '') + ' photo';
+      detailPhoto.hidden = false;
+      detailPhoto.onerror = function () { this.hidden = true; };
+    } else {
+      detailPhoto.hidden = true;
+    }
+
+    /* Info grid */
+    let html = '';
+    function row(label, value) {
+      if (!value || (typeof value === 'string' && !value.trim())) return;
+      html += '<span class="info-label">' + escapeHtml(label) + '</span>' +
+              '<span class="info-value">' + value + '</span>';
+    }
+    row('Address 地址', escapeHtml(info.displayAddress_tc));
+    row('Address', escapeHtml(info.displayAddress_en));
+    if (info.contactNo) row('Contact 聯絡', escapeHtml(info.contactNo));
+    if (info.height && info.height > 0) row('Height Limit', info.height + 'm');
+    if (info.opening_status) row('Status', escapeHtml(info.opening_status));
+    if (info.website_en) {
+      row('Website', '<a href="' + escapeHtml(info.website_en) + '" target="_blank" rel="noopener">' +
+        escapeHtml(new URL(info.website_en).hostname) + '</a>');
+    }
+    const remark = (info.remark_en || '').replace(/Height Limit:\s*\n?/i, '').trim();
+    if (remark) row('Remark', escapeHtml(remark));
+
+    detailInfoGrid.innerHTML = html;
   }
 
   /* ===== Data Fetching ===== */
@@ -247,12 +305,14 @@
 
     try {
       const rows = await fetchTypicalWeek(sectionId);
-      if (selectedSectionId !== sectionId) return; // stale
+      if (selectedSectionId !== sectionId) return;
       if (!rows || rows.length === 0) {
+        renderTdInfo(sectionId);
         showDetailView('nodata');
         return;
       }
       renderChart(rows, section);
+      renderTdInfo(sectionId);
       showDetailView('content');
     } catch (err) {
       console.error('Failed to load data:', err);
@@ -293,7 +353,7 @@
         _meta_totals: saturday,
       },
       {
-        label: 'Sunday',
+        label: 'Sunday & PH',
         data: sunday.map(d => d.avg_vacancy),
         backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--chart-sunday').trim(),
         borderRadius: 3,
@@ -415,7 +475,8 @@
       const [sections, dataSet, syncTime] = await Promise.all([
         fetchAllSections(),
         fetchHasDataSet(),
-        fetchSyncTime()
+        fetchSyncTime(),
+        fetchTdBasicInfo()
       ]);
 
       allSections = sections;

@@ -13,7 +13,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <div class="accent-bar" aria-hidden="true"></div>
@@ -69,15 +69,19 @@
             <button class="day-toggle active" data-day="weekday" aria-pressed="true">
               <span class="toggle-dot weekday-dot" aria-hidden="true"></span> Mon–Fri
             </button>
-            <button class="day-toggle active" data-day="saturday" aria-pressed="true">
+            <button class="day-toggle" data-day="saturday" aria-pressed="false">
               <span class="toggle-dot saturday-dot" aria-hidden="true"></span> Saturday
             </button>
-            <button class="day-toggle active" data-day="sunday" aria-pressed="true">
-              <span class="toggle-dot sunday-dot" aria-hidden="true"></span> Sunday
+            <button class="day-toggle" data-day="sunday" aria-pressed="false">
+              <span class="toggle-dot sunday-dot" aria-hidden="true"></span> Sunday &amp; PH
             </button>
           </div>
           <div class="chart-wrap">
             <canvas id="vacancy-chart" aria-label="Vacancy chart by hour"></canvas>
+          </div>
+          <div class="detail-info" id="detail-info" hidden>
+            <img id="detail-photo" class="detail-photo" alt="" hidden>
+            <div class="detail-info-grid" id="detail-info-grid"></div>
           </div>
         </div>
 
@@ -103,6 +107,6 @@
   <!-- Mobile overlay backdrop -->
   <div class="overlay-backdrop" id="overlay-backdrop" hidden aria-hidden="true"></div>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
