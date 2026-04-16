@@ -65,6 +65,11 @@
     return d.innerHTML;
   }
 
+  function stripHtml(s) {
+    if (!s) return '';
+    return s.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s{2,}/g, ' ').trim();
+  }
+
   /* ===== TD Basic Info ===== */
   async function fetchTdBasicInfo() {
     try {
@@ -112,7 +117,7 @@
       row('Website', '<a href="' + escapeHtml(info.website_en) + '" target="_blank" rel="noopener">' +
         escapeHtml(new URL(info.website_en).hostname) + '</a>');
     }
-    const remark = (info.remark_en || '').replace(/Height Limit:\s*\n?/i, '').trim();
+    const remark = stripHtml((info.remark_en || '').replace(/^Height Limit:\s*/i, '').trim());
     if (remark) row('Remark', escapeHtml(remark));
 
     detailInfoGrid.innerHTML = html;

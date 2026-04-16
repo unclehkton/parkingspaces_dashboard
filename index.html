@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hong Kong Carpark Monitor 香港泊車監察</title>
-  <meta name="description" content="Real-time parking vacancy data for Hong Kong carparks and metered spaces.">
+  <title>香港停車場空位趨勢 Hong Kong Car Parks Vacancy Trend</title>
+  <meta name="description" content="香港停車場空位趨勢圖表，顯示每日每小時平均空位數據。Hong Kong car park vacancy trend charts showing average hourly vacancy data by day of the week. Powered by Transport Department open data.">
+  <meta name="keywords" content="Hong Kong, car park, parking, vacancy, trend, 香港, 停車場, 空位, 趨勢, carpark">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,7 +14,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
   <div class="accent-bar" aria-hidden="true"></div>
@@ -22,8 +23,8 @@
     <header class="header" role="banner">
       <div class="header-inner">
         <div class="header-titles">
-          <h1 class="header-title-tc">泊車監察</h1>
-          <h1 class="header-title-en">Carpark Monitor</h1>
+          <h1 class="header-title-tc">香港停車場空位趨勢</h1>
+          <h1 class="header-title-en">Hong Kong Car Parks Vacancy Trend</h1>
         </div>
         <div class="header-sync" aria-live="polite">
           <span id="sync-label" class="sync-label">Synced: —</span>
@@ -107,6 +108,6 @@
   <!-- Mobile overlay backdrop -->
   <div class="overlay-backdrop" id="overlay-backdrop" hidden aria-hidden="true"></div>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
