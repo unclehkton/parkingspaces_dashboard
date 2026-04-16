@@ -3,15 +3,8 @@
   'use strict';
 
   /* ===== Configuration ===== */
-  const SUPABASE_URL = '__SUPABASE_URL__';
-  const SUPABASE_ANON_KEY = '__SUPABASE_ANON_KEY__';
-
-  /* ===== Credential Check ===== */
-  if (SUPABASE_URL.includes('__') || SUPABASE_ANON_KEY.includes('__')) {
-    document.getElementById('setup-message').hidden = false;
-    document.getElementById('app').hidden = true;
-    return;
-  }
+  const SUPABASE_URL = 'https://mexlfgaxipmfvoavmxra.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1leGxmZ2F4aXBtZnZvYXZteHJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzA5MDAsImV4cCI6MjA5MTkwNjkwMH0.m8-RBCfkF-U-Rxc_b3WeqJkoDFeEFdgoZhYa3xAFkwg';
 
   document.getElementById('setup-message').hidden = true;
   document.getElementById('app').hidden = false;
