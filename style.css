@@ -314,6 +314,25 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+.section-live-secondary {
+  margin-top: 0.15rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+.section-live-secondary-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-primary);
+}
+.section-live-secondary-label {
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 .section-name-tc {
   font-family: var(--font-tc);
   font-size: 0.88rem;

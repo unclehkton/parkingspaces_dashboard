@@ -7,6 +7,10 @@
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1leGxmZ2F4aXBtZnZvYXZteHJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzA5MDAsImV4cCI6MjA5MTkwNjkwMH0.m8-RBCfkF-U-Rxc_b3WeqJkoDFeEFdgoZhYa3xAFkwg';
   const TD_BASIC_INFO_URL = 'https://resource.data.one.gov.hk/td/carpark/basic_info_all.json';
   const TD_VACANCY_URL = 'https://resource.data.one.gov.hk/td/carpark/vacancy_all.json';
+  const EPD_EV_URL = 'https://ev-charger.epd.gov.hk/resource/ev_charger_avail/evca_ver_1_0.json';
+  const TD_METERED_OCCUPANCY_URL = 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv';
+  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=9';
+  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=9';
 
   /* ===== Supabase Client ===== */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -23,9 +27,14 @@
   const tdInfoMap = new Map();
   const sectionDetailsMap = new Map();
   const tdLiveVacancyMap = new Map();
+  const evLookupMap = new Map();
+  const evLiveSectionMap = new Map();
+  const meteredLiveVacancyMap = new Map();
   let chart = null;
   let dayVisibility = { weekday: true, saturday: false, sunday: false };
   let searchTimer = null;
+  let evLiveEntries = [];
+  let meteredLivePromise = null;
 
   /* ===== DOM References ===== */
   const $ = (sel) => document.querySelector(sel);
@@ -81,6 +90,7 @@
     if (source === 'datagovhk') return 'DGH';
     if (source === 'emobility') return 'eMobility';
     if (source === 'metered') return 'Metered';
+    if (source === 'epd') return 'EPD';
     return source;
   }
 
@@ -153,6 +163,146 @@
       .join('<br>');
   }
 
+  function normalizeKey(value) {
+    return (value == null ? '' : String(value)).trim().toLowerCase();
+  }
+
+  function toNumberOrNull(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function registerEvLookup(key, sectionId) {
+    const normalized = normalizeKey(key);
+    if (normalized && sectionId) evLookupMap.set(normalized, sectionId);
+  }
+
+  function mergeSectionDetailsRows(rows) {
+    (rows || []).forEach((row) => {
+      if (!row || !row.section_id) return;
+      const existing = sectionDetailsMap.get(row.section_id) || {};
+      sectionDetailsMap.set(row.section_id, { ...row, ...existing });
+      registerEvLookup(row.section_id, row.section_id);
+      registerEvLookup(row.emobility_park_id, row.section_id);
+      registerEvLookup(row.epd_charger_id, row.section_id);
+    });
+  }
+
+  function resolveEvSectionId(value) {
+    return evLookupMap.get(normalizeKey(value)) || null;
+  }
+
+  function buildEvMixFromLive(item) {
+    const mix = { standard: 0, medium: 0, fast: 0, superfast: 0, other: 0 };
+    const combos = Array.isArray(item && item.chargerTotalByCombinations) ? item.chargerTotalByCombinations : [];
+    combos.forEach((combo) => {
+      const count = Number(combo && combo.numOfCharger) || 0;
+      if (count <= 0) return;
+      const typeId = Number(combo && combo.chargerTypeID);
+      const typeName = String((combo && combo.typeEName) || '').toLowerCase();
+      if (typeId === 7 || typeName.includes('standard')) mix.standard += count;
+      else if (typeId === 6 || typeName.includes('medium')) mix.medium += count;
+      else if (typeId === 22 || typeName.includes('ultra') || typeName.includes('super')) mix.superfast += count;
+      else if (typeId === 5 || typeName.includes('quick') || typeName.includes('fast')) mix.fast += count;
+      else mix.other += count;
+    });
+    return mix;
+  }
+
+  function getEvLiveEntry(sectionId) {
+    const baseId = getBaseSectionId(sectionId);
+    return evLiveSectionMap.get(baseId) || evLiveSectionMap.get(sectionId) || null;
+  }
+
+  function mergeLiveEvSections(sections, dataSet) {
+    const merged = sections.slice();
+    const existingById = new Map(merged.map((section) => [section.id, section]));
+    const existingEvByBaseId = new Map(
+      merged
+        .filter((section) => section.type === 'ev')
+        .map((section) => [getBaseSectionId(section.id), section])
+    );
+    const carparkById = new Map(
+      merged
+        .filter((section) => section.type === 'carpark')
+        .map((section) => [section.id, section])
+    );
+
+    evLiveEntries.forEach((entry) => {
+      const matchedEv = existingEvByBaseId.get(entry.base_section_id || '');
+      if (matchedEv) {
+        dataSet.add(matchedEv.id);
+        return;
+      }
+
+      const carpark = entry.base_section_id ? carparkById.get(entry.base_section_id) : null;
+      const details = entry.base_section_id ? getSectionDetails(entry.base_section_id) : null;
+      const syntheticId = 'ev:' + (entry.base_section_id || entry.raw_carpark_id || entry.raw_id);
+      if (existingById.has(syntheticId)) {
+        dataSet.add(syntheticId);
+        return;
+      }
+
+      merged.push({
+        id: syntheticId,
+        type: 'ev',
+        name_en: (details && details.name_en) || entry.name_en || (carpark && carpark.name_en) || entry.raw_carpark_id || 'EV Chargers',
+        name_tc: (details && details.name_tc) || entry.name_tc || (carpark && carpark.name_tc) || entry.raw_carpark_id || 'EV Chargers',
+        district_en: (carpark && carpark.district_en) || (details && details.district_en) || '',
+        district_tc: (carpark && carpark.district_tc) || (details && details.district_tc) || '',
+        latitude: entry.latitude != null ? entry.latitude : (carpark && carpark.latitude) || (details && details.latitude) || null,
+        longitude: entry.longitude != null ? entry.longitude : (carpark && carpark.longitude) || (details && details.longitude) || null,
+        total_spaces: entry.total || (carpark && carpark.ev_total) || 0,
+        meter_rate_info: entry.mix
+      });
+      dataSet.add(syntheticId);
+    });
+
+    return merged;
+  }
+
+  function getListLiveHtml(section) {
+    const baseId = getBaseSectionId(section.id);
+    if (section.type === 'carpark') {
+      const liveVacancy = tdLiveVacancyMap.get(baseId);
+      const liveEv = getEvLiveEntry(section.id);
+      if ((!liveVacancy || typeof liveVacancy.vacancy !== 'number' || liveVacancy.vacancy < 0) && !liveEv) return '';
+      let html = '<div class="section-live">';
+      if (liveVacancy && typeof liveVacancy.vacancy === 'number' && liveVacancy.vacancy >= 0) {
+        html += '<div class="section-live-value">' + escapeHtml(String(liveVacancy.vacancy)) + '</div>' +
+          '<div class="section-live-label">live</div>';
+      }
+      if (liveEv && typeof liveEv.available === 'number' && liveEv.available >= 0) {
+        html += '<div class="section-live-secondary"><span class="section-live-secondary-value">' +
+          escapeHtml(String(liveEv.available)) + '</span><span class="section-live-secondary-label">EV</span></div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    if (section.type === 'ev') {
+      const liveEv = getEvLiveEntry(section.id);
+      if (!liveEv || typeof liveEv.available !== 'number' || liveEv.available < 0) return '';
+      let html = '<div class="section-live"><div class="section-live-value">' +
+        escapeHtml(String(liveEv.available)) + '</div><div class="section-live-label">live</div>';
+      if (typeof liveEv.total === 'number' && liveEv.total > 0) {
+        html += '<div class="section-live-secondary"><span class="section-live-secondary-value">' +
+          escapeHtml(String(liveEv.total)) + '</span><span class="section-live-secondary-label">total</span></div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    if (section.type === 'metered') {
+      const live = meteredLiveVacancyMap.get(section.id);
+      if (!live || typeof live.vacant !== 'number') return '';
+      return '<div class="section-live"><div class="section-live-value">' +
+        escapeHtml(String(live.vacant)) + '</div><div class="section-live-label">live</div></div>';
+    }
+
+    return '';
+  }
+
   function setDetailNote(message) {
     detailNote.textContent = message || '';
     detailNote.hidden = !message;
@@ -184,11 +334,20 @@
         if (!data || data.length < page) break;
         from += page;
       }
-      all.forEach(row => {
-        if (row && row.section_id) sectionDetailsMap.set(row.section_id, row);
-      });
+      mergeSectionDetailsRows(all);
     } catch (err) {
       console.warn('Supabase section_details fetch failed:', err);
+    }
+  }
+
+  async function fetchLocalCarparkDetails() {
+    try {
+      const resp = await fetch(LOCAL_CARPARK_DETAILS_URL, { cache: 'no-store' });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const rows = await resp.json();
+      mergeSectionDetailsRows(rows);
+    } catch (err) {
+      console.warn('Local carpark details fetch failed:', err);
     }
   }
 
@@ -222,9 +381,105 @@
     return tdLiveVacancyMap;
   }
 
+  async function fetchEvLiveData() {
+    if (evLiveEntries.length) return evLiveEntries;
+    try {
+      const resp = await fetch(EPD_EV_URL, { cache: 'no-store' });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const text = await resp.text();
+      const clean = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+      const data = JSON.parse(clean);
+      evLiveEntries = (data.data || [])
+        .filter((item) => item && item.isEnable !== false)
+        .map((item) => {
+          const baseSectionId = resolveEvSectionId(item.carParkId) || resolveEvSectionId(item.id);
+          const total = toNumberOrNull(item.numOfCharger) ?? toNumberOrNull(item.sizeOfCharger) ?? 0;
+          const available = toNumberOrNull(item.availableCharger) ?? 0;
+          const entry = {
+            raw_id: String(item.id || ''),
+            raw_carpark_id: String(item.carParkId || item.id || ''),
+            base_section_id: baseSectionId,
+            name_en: item.carParkEName || '',
+            name_tc: item.carParkCName || item.carParkScName || '',
+            address_en: item.carParkEAddress || '',
+            address_tc: item.carParkCAddress || item.carParkScAddress || '',
+            latitude: item.location && item.location.lat != null ? Number(item.location.lat) : null,
+            longitude: item.location && item.location.lng != null ? Number(item.location.lng) : null,
+            available: available,
+            total: total,
+            last_update: item.lastUpdateDate || '',
+            source: 'epd',
+            mix: buildEvMixFromLive(item),
+            opening_hours_en: item.openingHoursEn || '',
+            opening_hours_tc: item.openingHoursCh || item.openingHoursSc || ''
+          };
+          return entry;
+        });
+      evLiveEntries.forEach((entry) => {
+        if (entry.base_section_id) evLiveSectionMap.set(entry.base_section_id, entry);
+      });
+    } catch (err) {
+      console.warn('EPD EV live fetch failed:', err);
+    }
+    return evLiveEntries;
+  }
+
+  async function ensureMeteredLiveVacancy() {
+    if (meteredLiveVacancyMap.size) return meteredLiveVacancyMap;
+    if (meteredLivePromise) return meteredLivePromise;
+
+    meteredLivePromise = (async () => {
+      try {
+        const [mappingResp, occupancyResp] = await Promise.all([
+          fetch(LOCAL_METERED_SPACE_MAP_URL, { cache: 'no-store' }),
+          fetch(TD_METERED_OCCUPANCY_URL, { cache: 'no-store' })
+        ]);
+        if (!mappingResp.ok) throw new Error('metered map HTTP ' + mappingResp.status);
+        if (!occupancyResp.ok) throw new Error('occupancy CSV HTTP ' + occupancyResp.status);
+
+        const mapping = await mappingResp.json();
+        const text = await occupancyResp.text();
+        const lines = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
+        if (!lines.length) return meteredLiveVacancyMap;
+
+        const header = lines[0].split(',').map((cell) => cell.trim());
+        const spaceIndex = header.indexOf('ParkingSpaceId');
+        const meterIndex = header.indexOf('MeterStatus');
+        const occupancyIndex = header.indexOf('OccupancyStatus');
+        if (spaceIndex === -1 || meterIndex === -1 || occupancyIndex === -1) {
+          throw new Error('Unexpected occupancy CSV header');
+        }
+
+        for (let i = 1; i < lines.length; i += 1) {
+          const line = lines[i];
+          if (!line) continue;
+          const cols = line.split(',');
+          const spaceId = (cols[spaceIndex] || '').trim();
+          const sectionId = mapping[spaceId];
+          if (!sectionId) continue;
+          const meterStatus = (cols[meterIndex] || '').trim();
+          const occupancyStatus = (cols[occupancyIndex] || '').trim();
+          const entry = meteredLiveVacancyMap.get(sectionId) || { total: 0, vacant: 0, occupied: 0, not_in_use: 0 };
+          entry.total += 1;
+          if (meterStatus === 'NU') entry.not_in_use += 1;
+          else if (meterStatus === 'N' && occupancyStatus === 'V') entry.vacant += 1;
+          else if (meterStatus === 'N' && occupancyStatus === 'O') entry.occupied += 1;
+          meteredLiveVacancyMap.set(sectionId, entry);
+        }
+      } catch (err) {
+        console.warn('Metered live vacancy fetch failed:', err);
+      }
+
+      return meteredLiveVacancyMap;
+    })();
+
+    return meteredLivePromise;
+  }
+
   async function renderSectionInfo(section) {
     const details = getSectionDetails(section.id);
     const info = tdInfoMap.get(getBaseSectionId(section.id));
+    const liveEv = getEvLiveEntry(section.id);
     const background = details && details.background_info && typeof details.background_info === 'object'
       ? details.background_info
       : {};
@@ -251,6 +506,7 @@
 
     if (section.type === 'metered') {
       const mapUrl = buildCoordinateMapsUrl(section.latitude, section.longitude);
+      const live = meteredLiveVacancyMap.get(section.id);
       const district = [section.district_tc, section.district_en].filter(Boolean).join(' / ');
       row('District', escapeHtml(district));
       const streetTc = stripHtml(background.section_of_street_tc || (details && details.address_tc) || '');
@@ -266,11 +522,12 @@
       if (background.vehicle_types || section.vehicle_types) row('Vehicle Types', escapeHtml(background.vehicle_types || section.vehicle_types));
       if (background.operating_period) row('Operating Hours', escapeHtml(background.operating_period));
       if (background.meter_rate_info || section.meter_rate_info) row('Meter Rates', formatMeterRateInfo(background.meter_rate_info || section.meter_rate_info));
+      if (live && typeof live.vacant === 'number') row('Live Vacancy', escapeHtml(String(live.vacant) + ' spaces'));
       if (mapUrl) row('地圖 Map', buildMapIconHtml(mapUrl, 'Open street parking location in Google Maps'));
     } else {
       const coordinateMapUrl = buildCoordinateMapsUrl(section.latitude, section.longitude);
-      const addressTc = stripHtml((details && details.address_tc) || (info && info.displayAddress_tc) || '');
-      const addressEn = stripHtml((details && details.address_en) || (info && info.displayAddress_en) || '');
+      const addressTc = stripHtml((details && details.address_tc) || (info && info.displayAddress_tc) || (liveEv && liveEv.address_tc) || '');
+      const addressEn = stripHtml((details && details.address_en) || (info && info.displayAddress_en) || (liveEv && liveEv.address_en) || '');
       const addressMapUrl = addressTc
         ? 'https://maps.google.com/maps?q=' + encodeURIComponent(addressTc)
         : coordinateMapUrl;
@@ -283,7 +540,7 @@
       if (!addressTc && coordinateMapUrl) {
         row('地圖 Map', buildMapIconHtml(coordinateMapUrl, 'Open in Google Maps'));
       }
-      const sourceLabel = formatSourceLabel((details && details.source) || (info ? 'datagovhk' : ''));
+      const sourceLabel = formatSourceLabel((details && details.source) || (section.source) || (info ? 'datagovhk' : (liveEv ? 'epd' : '')));
       if (sourceLabel) row('Source', escapeHtml(sourceLabel));
       if (details && details.contact_no) row('聯絡 Contact', escapeHtml(details.contact_no));
       else if (info && info.contactNo) row('聯絡 Contact', escapeHtml(info.contactNo));
@@ -292,6 +549,10 @@
       if (details && details.opening_status) row('狀態 Status', escapeHtml(details.opening_status));
       else if (info && info.opening_status) row('狀態 Status', escapeHtml(info.opening_status));
       if (section.total_spaces) row(section.type === 'ev' ? 'Chargers' : 'Capacity', escapeHtml(getCapacityLabel(section)));
+      if (section.type === 'ev' && liveEv && typeof liveEv.available === 'number') {
+        const suffix = liveEv.last_update ? ' (update: ' + escapeHtml(liveEv.last_update) + ')' : '';
+        row('Live Availability', escapeHtml(String(liveEv.available) + ' chargers') + suffix);
+      }
       if (details && details.website_url) {
         row('網站 Website', formatLink(details.website_url));
       } else if (info && info.website_en) {
@@ -306,8 +567,12 @@
         if (remarkEn) remarkHtml += '<span style="opacity:0.7;font-size:0.9em">' + escapeHtml(remarkEn) + '</span>';
         row('備註 Remark', remarkHtml);
       }
-      if (section.type === 'ev' && section.meter_rate_info) {
-        row('EV Mix', formatEvBreakdown(section.meter_rate_info));
+      if (section.type === 'ev' && (section.meter_rate_info || (liveEv && liveEv.mix))) {
+        row('EV Mix', formatEvBreakdown(section.meter_rate_info || liveEv.mix));
+      }
+      if (section.type === 'ev' && liveEv) {
+        if (liveEv.opening_hours_tc) row('開放時間', escapeHtml(liveEv.opening_hours_tc));
+        else if (liveEv.opening_hours_en) row('Opening Hours', escapeHtml(liveEv.opening_hours_en));
       }
       if (section.type === 'carpark' && (((details && details.source) === 'datagovhk') || info)) {
         const liveVacancies = await fetchTdLiveVacancy();
@@ -316,6 +581,9 @@
           const suffix = live.last_update ? ' (update: ' + formatSyncTime(live.last_update) + ')' : '';
           row('Live Vacancy', escapeHtml(String(live.vacancy) + ' spaces' + suffix));
         }
+      }
+      if (section.type === 'carpark' && liveEv && typeof liveEv.available === 'number') {
+        row('Live EV Available', escapeHtml(String(liveEv.available) + ' chargers'));
       }
     }
 
@@ -466,10 +734,7 @@
         ? '<span class="badge badge-spaces">' + escapeHtml(getCapacityLabel(s)) + '</span>' : '';
       const noDataBadge = !hasDataSet.has(s.id)
         ? '<span class="badge badge-nodata">No data</span>' : '';
-      const liveVacancy = selectedType === 'carpark' ? tdLiveVacancyMap.get(getBaseSectionId(s.id)) : null;
-      const liveVacancyHtml = liveVacancy && typeof liveVacancy.vacancy === 'number' && liveVacancy.vacancy >= 0
-        ? '<div class="section-live"><div class="section-live-value">' + escapeHtml(String(liveVacancy.vacancy)) + '</div><div class="section-live-label">live</div></div>'
-        : '';
+      const liveVacancyHtml = getListLiveHtml(s);
 
       li.innerHTML =
         '<div class="section-item-body">' +
@@ -549,9 +814,14 @@
       if (!rows || rows.length === 0) {
         if (chart) { chart.destroy(); chart = null; }
         chartWrap.hidden = true;
-        setDetailNote(section.type === 'metered'
-          ? 'No vacancy history is available yet. Background information is shown below.'
-          : 'No vacancy history is available yet. Basic information is shown below.');
+        const liveEv = getEvLiveEntry(section.id);
+        if (section.type === 'metered') {
+          setDetailNote('No vacancy history is available yet. Background information is shown below.');
+        } else if (section.type === 'ev' && liveEv) {
+          setDetailNote('Live EV availability is shown below. Historical averages will appear after EV sync is enabled.');
+        } else {
+          setDetailNote('No vacancy history is available yet. Basic information is shown below.');
+        }
         showDetailView('content');
         return;
       }
@@ -685,7 +955,7 @@
 
   /* ===== Type Tabs ===== */
   $$('.type-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
+    tab.addEventListener('click', async () => {
       if (tab.dataset.type === selectedType) return;
       $$('.type-tab').forEach(t => {
         t.classList.remove('active');
@@ -697,6 +967,9 @@
       selectedSectionId = null;
       selectedDistrict = '';
       districtSelect.value = '';
+      if (selectedType === 'metered') {
+        await ensureMeteredLiveVacancy();
+      }
       populateDistricts();
       applyFilters();
       showDetailView('placeholder');
@@ -737,10 +1010,13 @@
         fetchSyncTime(),
         fetchTdBasicInfo(),
         fetchTdLiveVacancy(),
-        fetchSectionDetails()
+        fetchSectionDetails(),
+        fetchLocalCarparkDetails()
       ]);
 
-      allSections = sections;
+      await fetchEvLiveData();
+
+      allSections = mergeLiveEvSections(sections, dataSet);
       hasDataSet = dataSet;
 
       syncLabel.textContent = 'Synced: ' + formatSyncTime(syncTime);
