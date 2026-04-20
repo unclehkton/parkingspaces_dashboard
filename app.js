@@ -9,9 +9,9 @@
   const TD_VACANCY_URL = 'https://resource.data.one.gov.hk/td/carpark/vacancy_all.json';
   const EPD_EV_URL = 'https://ev-charger.epd.gov.hk/resource/ev_charger_avail/evca_ver_1_0.json';
   const TD_METERED_OCCUPANCY_URL = 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv';
-  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=12';
-  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=12';
-  const LOCAL_EV_LIVE_URL = './ev-live.json?v=12';
+  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=13';
+  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=13';
+  const LOCAL_EV_LIVE_URL = './ev-live.json?v=13';
 
   /* ===== Supabase Client ===== */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -411,14 +411,18 @@
       const resp = await fetch(LOCAL_EV_LIVE_URL, { cache: 'no-store' });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const rows = await resp.json();
-      return storeEntries((rows || []).map((entry) => ({
-        ...entry,
-        available: toNumberOrNull(entry.available) ?? 0,
-        total: toNumberOrNull(entry.total) ?? 0,
-        latitude: toNumberOrNull(entry.latitude),
-        longitude: toNumberOrNull(entry.longitude),
-        mix: entry.mix || { standard: 0, medium: 0, fast: 0, superfast: 0, other: 0 }
-      })));
+      return storeEntries((rows || []).map((entry) => {
+        const availableCount = toNumberOrNull(entry.available);
+        const totalCount = toNumberOrNull(entry.total);
+        return {
+          ...entry,
+          available: availableCount == null ? 0 : availableCount,
+          total: totalCount == null ? 0 : totalCount,
+          latitude: toNumberOrNull(entry.latitude),
+          longitude: toNumberOrNull(entry.longitude),
+          mix: entry.mix || { standard: 0, medium: 0, fast: 0, superfast: 0, other: 0 }
+        };
+      }));
     } catch (err) {
       console.warn('Local EV live feed fetch failed:', err);
     }
@@ -433,8 +437,11 @@
         .filter((item) => item && item.isEnable !== false)
         .map((item) => {
           const baseSectionId = resolveEvSectionId(item.carParkId) || resolveEvSectionId(item.id);
-          const total = toNumberOrNull(item.numOfCharger) ?? toNumberOrNull(item.sizeOfCharger) ?? 0;
-          const available = toNumberOrNull(item.availableCharger) ?? 0;
+          const totalCount = toNumberOrNull(item.numOfCharger);
+          const fallbackTotalCount = toNumberOrNull(item.sizeOfCharger);
+          const total = totalCount == null ? (fallbackTotalCount == null ? 0 : fallbackTotalCount) : totalCount;
+          const availableCount = toNumberOrNull(item.availableCharger);
+          const available = availableCount == null ? 0 : availableCount;
           const entry = {
             raw_id: String(item.id || ''),
             raw_carpark_id: String(item.carParkId || item.id || ''),
