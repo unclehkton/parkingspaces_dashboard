@@ -9,9 +9,10 @@
   const TD_VACANCY_URL = 'https://resource.data.one.gov.hk/td/carpark/vacancy_all.json';
   const EPD_EV_URL = 'https://ev-charger.epd.gov.hk/resource/ev_charger_avail/evca_ver_1_0.json';
   const TD_METERED_OCCUPANCY_URL = 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv';
-  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=10';
-  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=10';
-  const LOCAL_EV_LIVE_URL = './ev-live.json?v=10';
+  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=11';
+  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=11';
+  const LOCAL_EV_LIVE_URL = './ev-live.json?v=11';
+  const LOCAL_EV_TYPICAL_WEEK_URL = './ev-typical-week.json?v=11';
 
   /* ===== Supabase Client ===== */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -36,6 +37,7 @@
   let searchTimer = null;
   let evLiveEntries = [];
   let meteredLivePromise = null;
+  let evTypicalWeekPromise = null;
 
   /* ===== DOM References ===== */
   const $ = (sel) => document.querySelector(sel);
@@ -514,6 +516,21 @@
     return meteredLivePromise;
   }
 
+  async function fetchLocalEvTypicalWeek() {
+    if (evTypicalWeekPromise) return evTypicalWeekPromise;
+    evTypicalWeekPromise = (async () => {
+      try {
+        const resp = await fetch(LOCAL_EV_TYPICAL_WEEK_URL, { cache: 'no-store' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return await resp.json();
+      } catch (err) {
+        console.warn('Local EV typical-week fetch failed:', err);
+        return {};
+      }
+    })();
+    return evTypicalWeekPromise;
+  }
+
   async function renderSectionInfo(section) {
     const details = getSectionDetails(section.id);
     const info = tdInfoMap.get(getBaseSectionId(section.id));
@@ -671,10 +688,23 @@
 
   async function fetchTypicalWeek(sectionId) {
     if (dataCache.has(sectionId)) return dataCache.get(sectionId);
-    const { data, error } = await sb.from('typical_week').select('*')
-      .eq('section_id', sectionId);
-    if (error) throw error;
-    if (data) dataCache.set(sectionId, data);
+    let data = [];
+    try {
+      const resp = await sb.from('typical_week').select('*')
+        .eq('section_id', sectionId);
+      if (resp.error) throw resp.error;
+      data = resp.data || [];
+    } catch (err) {
+      if (!sectionId.startsWith('ev:')) throw err;
+      console.warn('Supabase EV typical-week fetch failed, using local fallback if present:', err);
+    }
+
+    if ((!data || data.length === 0) && sectionId.startsWith('ev:')) {
+      const fallback = await fetchLocalEvTypicalWeek();
+      data = fallback[sectionId] || [];
+    }
+
+    dataCache.set(sectionId, data || []);
     return data || [];
   }
 
