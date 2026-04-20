@@ -9,8 +9,9 @@
   const TD_VACANCY_URL = 'https://resource.data.one.gov.hk/td/carpark/vacancy_all.json';
   const EPD_EV_URL = 'https://ev-charger.epd.gov.hk/resource/ev_charger_avail/evca_ver_1_0.json';
   const TD_METERED_OCCUPANCY_URL = 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv';
-  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=9';
-  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=9';
+  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=10';
+  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=10';
+  const LOCAL_EV_LIVE_URL = './ev-live.json?v=10';
 
   /* ===== Supabase Client ===== */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -87,10 +88,10 @@
 
   function formatSourceLabel(source) {
     if (!source) return '';
-    if (source === 'datagovhk') return 'DGH';
+    if (source === 'datagovhk') return '運輸署出行易 Transport Department';
     if (source === 'emobility') return 'eMobility';
-    if (source === 'metered') return 'Metered';
-    if (source === 'epd') return 'EPD';
+    if (source === 'metered') return '運輸署 Transport Department';
+    if (source === 'epd') return '環保署 Environmental Protection Department';
     return source;
   }
 
@@ -308,6 +309,20 @@
     detailNote.hidden = !message;
   }
 
+  function formatMeteredVehicleTypes(value) {
+    const mapping = {
+      A: '所有車輛 (私家車) All Vehicles (Private Cars)',
+      C: '巴士 Coaches',
+      G: '貨車 Goods Vehicles'
+    };
+    return String(value || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => mapping[item] || item)
+      .join(' / ');
+  }
+
   /* ===== TD Basic Info ===== */
   async function fetchTdBasicInfo() {
     try {
@@ -383,6 +398,31 @@
 
   async function fetchEvLiveData() {
     if (evLiveEntries.length) return evLiveEntries;
+
+    function storeEntries(entries) {
+      evLiveEntries = entries;
+      evLiveEntries.forEach((entry) => {
+        if (entry.base_section_id) evLiveSectionMap.set(entry.base_section_id, entry);
+      });
+      return evLiveEntries;
+    }
+
+    try {
+      const resp = await fetch(LOCAL_EV_LIVE_URL, { cache: 'no-store' });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const rows = await resp.json();
+      return storeEntries((rows || []).map((entry) => ({
+        ...entry,
+        available: toNumberOrNull(entry.available) ?? 0,
+        total: toNumberOrNull(entry.total) ?? 0,
+        latitude: toNumberOrNull(entry.latitude),
+        longitude: toNumberOrNull(entry.longitude),
+        mix: entry.mix || { standard: 0, medium: 0, fast: 0, superfast: 0, other: 0 }
+      })));
+    } catch (err) {
+      console.warn('Local EV live feed fetch failed:', err);
+    }
+
     try {
       const resp = await fetch(EPD_EV_URL, { cache: 'no-store' });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -415,9 +455,7 @@
           };
           return entry;
         });
-      evLiveEntries.forEach((entry) => {
-        if (entry.base_section_id) evLiveSectionMap.set(entry.base_section_id, entry);
-      });
+      return storeEntries(evLiveEntries);
     } catch (err) {
       console.warn('EPD EV live fetch failed:', err);
     }
@@ -485,7 +523,7 @@
       : {};
     let html = '';
     let hasInfo = false;
-    detailInfoTitle.textContent = section.type === 'metered' ? 'Background Information' : 'Basic Information';
+    detailInfoTitle.textContent = section.type === 'metered' ? '錶位資料 Information' : '基本資料 Basic Information';
 
     function row(label, value) {
       if (!value || (typeof value === 'string' && !value.trim())) return;
@@ -508,7 +546,7 @@
       const mapUrl = buildCoordinateMapsUrl(section.latitude, section.longitude);
       const live = meteredLiveVacancyMap.get(section.id);
       const district = [section.district_tc, section.district_en].filter(Boolean).join(' / ');
-      row('District', escapeHtml(district));
+      row('地區 District', escapeHtml(district));
       const streetTc = stripHtml(background.section_of_street_tc || (details && details.address_tc) || '');
       const streetEn = stripHtml(background.section_of_street_en || (details && details.address_en) || '');
       if (streetTc || streetEn) {
@@ -516,13 +554,13 @@
         if (streetTc) streetHtml += escapeHtml(streetTc);
         if (streetTc && streetEn) streetHtml += '<br>';
         if (streetEn) streetHtml += '<span style="opacity:0.7;font-size:0.9em">' + escapeHtml(streetEn) + '</span>';
-        row('Section', streetHtml);
+        row('路段 Section', streetHtml);
       }
-      if (section.total_spaces || background.total_spaces) row('Parking Spaces', escapeHtml(String(section.total_spaces || background.total_spaces)));
-      if (background.vehicle_types || section.vehicle_types) row('Vehicle Types', escapeHtml(background.vehicle_types || section.vehicle_types));
-      if (background.operating_period) row('Operating Hours', escapeHtml(background.operating_period));
-      if (background.meter_rate_info || section.meter_rate_info) row('Meter Rates', formatMeterRateInfo(background.meter_rate_info || section.meter_rate_info));
-      if (live && typeof live.vacant === 'number') row('Live Vacancy', escapeHtml(String(live.vacant) + ' spaces'));
+      if (section.total_spaces || background.total_spaces) row('停車位數量 Parking Spaces', escapeHtml(String(section.total_spaces || background.total_spaces)));
+      if (background.vehicle_types || section.vehicle_types) row('車輛種類 Vehicle Type', escapeHtml(formatMeteredVehicleTypes(background.vehicle_types || section.vehicle_types)));
+      if (background.operating_period) row('開放時間 Hours', escapeHtml(background.operating_period));
+      if (background.meter_rate_info || section.meter_rate_info) row('咪錶收費 Meter Rates', formatMeterRateInfo(background.meter_rate_info || section.meter_rate_info));
+      if (live && typeof live.vacant === 'number') row('實時空位 Live Vacancy', escapeHtml(String(live.vacant) + ' spaces'));
       if (mapUrl) row('地圖 Map', buildMapIconHtml(mapUrl, 'Open street parking location in Google Maps'));
     } else {
       const coordinateMapUrl = buildCoordinateMapsUrl(section.latitude, section.longitude);
@@ -535,23 +573,23 @@
       if (addressTcHtml && addressMapUrl) {
         addressTcHtml += buildMapIconHtml(addressMapUrl, 'Open in Google Maps');
       }
-      row('地址', addressTcHtml);
+      row('地址 Address', addressTcHtml);
       row('Address', escapeHtml(addressEn));
       if (!addressTc && coordinateMapUrl) {
         row('地圖 Map', buildMapIconHtml(coordinateMapUrl, 'Open in Google Maps'));
       }
       const sourceLabel = formatSourceLabel((details && details.source) || (section.source) || (info ? 'datagovhk' : (liveEv ? 'epd' : '')));
-      if (sourceLabel) row('Source', escapeHtml(sourceLabel));
-      if (details && details.contact_no) row('聯絡 Contact', escapeHtml(details.contact_no));
-      else if (info && info.contactNo) row('聯絡 Contact', escapeHtml(info.contactNo));
+      if (sourceLabel) row('資料來源 Source', escapeHtml(sourceLabel));
+      if (details && details.contact_no) row('聯絡電話 Contact', escapeHtml(details.contact_no));
+      else if (info && info.contactNo) row('聯絡電話 Contact', escapeHtml(info.contactNo));
       if (details && details.height_limit_m) row('高度限制 Height', escapeHtml(String(details.height_limit_m)));
       else if (info && info.height && info.height > 0) row('高度限制 Height', info.height + 'm');
       if (details && details.opening_status) row('狀態 Status', escapeHtml(details.opening_status));
       else if (info && info.opening_status) row('狀態 Status', escapeHtml(info.opening_status));
-      if (section.total_spaces) row(section.type === 'ev' ? 'Chargers' : 'Capacity', escapeHtml(getCapacityLabel(section)));
+      if (section.total_spaces) row(section.type === 'ev' ? '充電器數量 Chargers' : '車位數量 Capacity', escapeHtml(getCapacityLabel(section)));
       if (section.type === 'ev' && liveEv && typeof liveEv.available === 'number') {
         const suffix = liveEv.last_update ? ' (update: ' + escapeHtml(liveEv.last_update) + ')' : '';
-        row('Live Availability', escapeHtml(String(liveEv.available) + ' chargers') + suffix);
+        row('實時充電位 Live Availability', escapeHtml(String(liveEv.available) + ' chargers') + suffix);
       }
       if (details && details.website_url) {
         row('網站 Website', formatLink(details.website_url));
@@ -568,22 +606,22 @@
         row('備註 Remark', remarkHtml);
       }
       if (section.type === 'ev' && (section.meter_rate_info || (liveEv && liveEv.mix))) {
-        row('EV Mix', formatEvBreakdown(section.meter_rate_info || liveEv.mix));
+        row('充電器種類 EV Mix', formatEvBreakdown(section.meter_rate_info || liveEv.mix));
       }
       if (section.type === 'ev' && liveEv) {
-        if (liveEv.opening_hours_tc) row('開放時間', escapeHtml(liveEv.opening_hours_tc));
-        else if (liveEv.opening_hours_en) row('Opening Hours', escapeHtml(liveEv.opening_hours_en));
+        if (liveEv.opening_hours_tc) row('開放時間 Hours', escapeHtml(liveEv.opening_hours_tc));
+        else if (liveEv.opening_hours_en) row('開放時間 Hours', escapeHtml(liveEv.opening_hours_en));
       }
       if (section.type === 'carpark' && (((details && details.source) === 'datagovhk') || info)) {
         const liveVacancies = await fetchTdLiveVacancy();
         const live = liveVacancies.get(getBaseSectionId(section.id));
         if (live && typeof live.vacancy === 'number' && live.vacancy >= 0) {
           const suffix = live.last_update ? ' (update: ' + formatSyncTime(live.last_update) + ')' : '';
-          row('Live Vacancy', escapeHtml(String(live.vacancy) + ' spaces' + suffix));
+          row('實時車位 Live Vacancy', escapeHtml(String(live.vacancy) + ' spaces' + suffix));
         }
       }
       if (section.type === 'carpark' && liveEv && typeof liveEv.available === 'number') {
-        row('Live EV Available', escapeHtml(String(liveEv.available) + ' chargers'));
+        row('實時充電位 Live EV Available', escapeHtml(String(liveEv.available) + ' chargers'));
       }
     }
 
