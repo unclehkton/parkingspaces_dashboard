@@ -14,7 +14,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
   <div class="accent-bar" aria-hidden="true"></div>
@@ -81,7 +81,9 @@
           <div class="chart-wrap">
             <canvas id="vacancy-chart" aria-label="Vacancy chart by hour"></canvas>
           </div>
+          <p class="detail-note" id="detail-note" hidden></p>
           <div class="detail-info" id="detail-info" hidden>
+            <div class="detail-info-title" id="detail-info-title">Basic Information</div>
             <div class="detail-info-grid" id="detail-info-grid"></div>
             <img id="detail-photo" class="detail-photo" alt="" hidden>
           </div>
@@ -109,6 +111,6 @@
   <!-- Mobile overlay backdrop -->
   <div class="overlay-backdrop" id="overlay-backdrop" hidden aria-hidden="true"></div>
 
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

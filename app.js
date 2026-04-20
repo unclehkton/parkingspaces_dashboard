@@ -6,6 +6,7 @@
   const SUPABASE_URL = 'https://mexlfgaxipmfvoavmxra.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1leGxmZ2F4aXBtZnZvYXZteHJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzA5MDAsImV4cCI6MjA5MTkwNjkwMH0.m8-RBCfkF-U-Rxc_b3WeqJkoDFeEFdgoZhYa3xAFkwg';
   const TD_BASIC_INFO_URL = 'https://resource.data.one.gov.hk/td/carpark/basic_info_all.json';
+  const TD_VACANCY_URL = 'https://resource.data.one.gov.hk/td/carpark/vacancy_all.json';
 
   /* ===== Supabase Client ===== */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -20,6 +21,8 @@
   let selectedSectionId = null;
   const dataCache = new Map();
   const tdInfoMap = new Map();
+  const sectionDetailsMap = new Map();
+  const tdLiveVacancyMap = new Map();
   let chart = null;
   let dayVisibility = { weekday: true, saturday: false, sunday: false };
   let searchTimer = null;
@@ -42,8 +45,11 @@
   const detailMeta = $('#detail-meta');
   const detailPanel = $('#detail-panel');
   const detailInfo = $('#detail-info');
+  const detailInfoTitle = $('#detail-info-title');
   const detailPhoto = $('#detail-photo');
   const detailInfoGrid = $('#detail-info-grid');
+  const detailNote = $('#detail-note');
+  const chartWrap = detailContent.querySelector('.chart-wrap');
   const backBtn = $('#back-btn');
   const overlayBackdrop = $('#overlay-backdrop');
   const chartCanvas = $('#vacancy-chart');
@@ -70,6 +76,29 @@
     return s.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s{2,}/g, ' ').trim();
   }
 
+  function formatSourceLabel(source) {
+    if (!source) return '';
+    if (source === 'datagovhk') return 'DGH';
+    if (source === 'emobility') return 'eMobility';
+    if (source === 'metered') return 'Metered';
+    return source;
+  }
+
+  function formatLink(url) {
+    if (!url) return '';
+    try {
+      return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' +
+        escapeHtml(new URL(url).hostname) + '</a>';
+    } catch (_err) {
+      return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' +
+        escapeHtml(url) + '</a>';
+    }
+  }
+
+  function getSectionDetails(sectionId) {
+    return sectionDetailsMap.get(sectionId) || sectionDetailsMap.get(getBaseSectionId(sectionId)) || null;
+  }
+
   function getBaseSectionId(sectionId) {
     return sectionId && sectionId.startsWith('ev:') ? sectionId.slice(3) : sectionId;
   }
@@ -79,6 +108,54 @@
     return section.type === 'ev'
       ? section.total_spaces + ' chargers'
       : section.total_spaces + ' spaces';
+  }
+
+  function buildCoordinateMapsUrl(latitude, longitude) {
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '';
+    return 'https://maps.google.com/maps?q=' + encodeURIComponent(lat + ',' + lng);
+  }
+
+  function buildMapIconHtml(url, label) {
+    if (!url) return '';
+    return '<a class="map-icon-link" href="' + escapeHtml(url) +
+      '" target="_blank" rel="noopener" aria-label="' + escapeHtml(label || 'Open in Google Maps') + '">🗺️</a>';
+  }
+
+  function formatMeterRateInfo(info) {
+    if (!info || typeof info !== 'object') return '';
+    const lines = [];
+    Object.entries(info).forEach(([vehicleType, rate]) => {
+      if (!rate || typeof rate !== 'object') return;
+      const payment = rate.payment_unit ? '$' + rate.payment_unit : '';
+      const time = rate.time_unit ? '/' + rate.time_unit + ' min' : '';
+      const limited = Array.isArray(rate.lpp) && rate.lpp.length ? ' (max ' + rate.lpp.join(', ') + ' min)' : '';
+      if (payment || time) {
+        lines.push(escapeHtml(vehicleType + ': ' + payment + time + limited));
+      }
+    });
+    return lines.join('<br>');
+  }
+
+  function formatEvBreakdown(info) {
+    if (!info || typeof info !== 'object') return '';
+    const labels = [
+      ['standard', 'Standard'],
+      ['medium', 'Medium'],
+      ['fast', 'Fast'],
+      ['superfast', 'Superfast'],
+      ['other', 'Other']
+    ];
+    return labels
+      .filter(([key]) => (info[key] || 0) > 0)
+      .map(([key, label]) => escapeHtml(label + ': ' + info[key]))
+      .join('<br>');
+  }
+
+  function setDetailNote(message) {
+    detailNote.textContent = message || '';
+    detailNote.hidden = !message;
   }
 
   /* ===== TD Basic Info ===== */
@@ -94,60 +171,156 @@
     }
   }
 
-  function renderTdInfo(sectionId) {
-    const info = tdInfoMap.get(sectionId);
-    if (!info) {
-      detailInfo.hidden = true;
-      return;
+  async function fetchSectionDetails() {
+    let all = [];
+    let from = 0;
+    const page = 1000;
+    try {
+      for (;;) {
+        const { data, error } = await sb.from('section_details').select('*')
+          .range(from, from + page - 1).order('section_id');
+        if (error) throw error;
+        if (data) all = all.concat(data);
+        if (!data || data.length < page) break;
+        from += page;
+      }
+      all.forEach(row => {
+        if (row && row.section_id) sectionDetailsMap.set(row.section_id, row);
+      });
+    } catch (err) {
+      console.warn('Supabase section_details fetch failed:', err);
     }
-    detailInfo.hidden = false;
+  }
 
-    /* Photo */
-    if (info.carpark_photo) {
-      detailPhoto.src = info.carpark_photo.replace('http://', 'https://');
-      detailPhoto.alt = (info.name_en || '') + ' photo';
+  async function fetchTdLiveVacancy() {
+    if (tdLiveVacancyMap.size) return tdLiveVacancyMap;
+    try {
+      const resp = await fetch(TD_VACANCY_URL);
+      const text = await resp.text();
+      const clean = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+      const data = JSON.parse(clean);
+      (data.car_park || []).forEach(cp => {
+        let privateCarVacancy = null;
+        let lastUpdate = '';
+        (cp.vehicle_type || []).forEach(vt => {
+          if (vt.type !== 'P') return;
+          (vt.service_category || []).forEach(sc => {
+            if (sc.category === 'HOURLY' && typeof sc.vacancy === 'number' && sc.vacancy >= 0 && privateCarVacancy === null) {
+              privateCarVacancy = sc.vacancy;
+              lastUpdate = sc.lastupdate || '';
+            }
+          });
+        });
+        tdLiveVacancyMap.set(cp.park_id, {
+          vacancy: privateCarVacancy,
+          last_update: lastUpdate
+        });
+      });
+    } catch (err) {
+      console.warn('TD vacancy fetch failed:', err);
+    }
+    return tdLiveVacancyMap;
+  }
+
+  async function renderSectionInfo(section) {
+    const details = getSectionDetails(section.id);
+    const info = tdInfoMap.get(getBaseSectionId(section.id));
+    const background = details && details.background_info && typeof details.background_info === 'object'
+      ? details.background_info
+      : {};
+    let html = '';
+    let hasInfo = false;
+    detailInfoTitle.textContent = section.type === 'metered' ? 'Background Information' : 'Basic Information';
+
+    function row(label, value) {
+      if (!value || (typeof value === 'string' && !value.trim())) return;
+      hasInfo = true;
+      html += '<span class="info-label">' + escapeHtml(label) + '</span>' +
+              '<span class="info-value">' + value + '</span>';
+    }
+
+    const photoUrl = (details && details.photo_url) || (info && info.carpark_photo) || '';
+    if (photoUrl) {
+      detailPhoto.src = photoUrl.replace('http://', 'https://');
+      detailPhoto.alt = ((info && info.name_en) || section.name_en || '') + ' photo';
       detailPhoto.hidden = false;
       detailPhoto.onerror = function () { this.hidden = true; };
     } else {
       detailPhoto.hidden = true;
     }
 
-    /* Info grid */
-    let html = '';
-    const addressTc = stripHtml(info.displayAddress_tc || '');
-    const mapsUrl = addressTc
-      ? 'https://maps.google.com/maps?q=' + encodeURIComponent(addressTc)
-      : '';
-    function row(label, value) {
-      if (!value || (typeof value === 'string' && !value.trim())) return;
-      html += '<span class="info-label">' + escapeHtml(label) + '</span>' +
-              '<span class="info-value">' + value + '</span>';
-    }
-    let addressTcHtml = escapeHtml(addressTc);
-    if (mapsUrl) {
-      addressTcHtml += '<a class="map-icon-link" href="' + escapeHtml(mapsUrl) +
-        '" target="_blank" rel="noopener" aria-label="Open in Google Maps">🗺️</a>';
-    }
-    row('地址', addressTcHtml);
-    row('Address', escapeHtml(info.displayAddress_en));
-    if (info.contactNo) row('聯絡 Contact', escapeHtml(info.contactNo));
-    if (info.height && info.height > 0) row('高度限制 Height', info.height + 'm');
-    if (info.opening_status) row('狀態 Status', escapeHtml(info.opening_status));
-    if (info.website_en) {
-      row('網站 Website', '<a href="' + escapeHtml(info.website_en) + '" target="_blank" rel="noopener">' +
-        escapeHtml(new URL(info.website_en).hostname) + '</a>');
-    }
-    const remarkTc = stripHtml((info.remark_tc || '').replace(/^高度限制[:：]\s*/i, '').trim());
-    const remarkEn = stripHtml((info.remark_en || '').replace(/^Height Limit:\s*/i, '').trim());
-    if (remarkTc || remarkEn) {
-      let remarkHtml = '';
-      if (remarkTc) remarkHtml += escapeHtml(remarkTc);
-      if (remarkTc && remarkEn) remarkHtml += '<br>';
-      if (remarkEn) remarkHtml += '<span style="opacity:0.7;font-size:0.9em">' + escapeHtml(remarkEn) + '</span>';
-      row('備註 Remark', remarkHtml);
+    if (section.type === 'metered') {
+      const mapUrl = buildCoordinateMapsUrl(section.latitude, section.longitude);
+      const district = [section.district_tc, section.district_en].filter(Boolean).join(' / ');
+      row('District', escapeHtml(district));
+      const streetTc = stripHtml(background.section_of_street_tc || (details && details.address_tc) || '');
+      const streetEn = stripHtml(background.section_of_street_en || (details && details.address_en) || '');
+      if (streetTc || streetEn) {
+        let streetHtml = '';
+        if (streetTc) streetHtml += escapeHtml(streetTc);
+        if (streetTc && streetEn) streetHtml += '<br>';
+        if (streetEn) streetHtml += '<span style="opacity:0.7;font-size:0.9em">' + escapeHtml(streetEn) + '</span>';
+        row('Section', streetHtml);
+      }
+      if (section.total_spaces || background.total_spaces) row('Parking Spaces', escapeHtml(String(section.total_spaces || background.total_spaces)));
+      if (background.vehicle_types || section.vehicle_types) row('Vehicle Types', escapeHtml(background.vehicle_types || section.vehicle_types));
+      if (background.operating_period) row('Operating Hours', escapeHtml(background.operating_period));
+      if (background.meter_rate_info || section.meter_rate_info) row('Meter Rates', formatMeterRateInfo(background.meter_rate_info || section.meter_rate_info));
+      if (mapUrl) row('地圖 Map', buildMapIconHtml(mapUrl, 'Open street parking location in Google Maps'));
+    } else {
+      const coordinateMapUrl = buildCoordinateMapsUrl(section.latitude, section.longitude);
+      const addressTc = stripHtml((details && details.address_tc) || (info && info.displayAddress_tc) || '');
+      const addressEn = stripHtml((details && details.address_en) || (info && info.displayAddress_en) || '');
+      const addressMapUrl = addressTc
+        ? 'https://maps.google.com/maps?q=' + encodeURIComponent(addressTc)
+        : coordinateMapUrl;
+      let addressTcHtml = addressTc ? escapeHtml(addressTc) : '';
+      if (addressTcHtml && addressMapUrl) {
+        addressTcHtml += buildMapIconHtml(addressMapUrl, 'Open in Google Maps');
+      }
+      row('地址', addressTcHtml);
+      row('Address', escapeHtml(addressEn));
+      if (!addressTc && coordinateMapUrl) {
+        row('地圖 Map', buildMapIconHtml(coordinateMapUrl, 'Open in Google Maps'));
+      }
+      const sourceLabel = formatSourceLabel((details && details.source) || (info ? 'datagovhk' : ''));
+      if (sourceLabel) row('Source', escapeHtml(sourceLabel));
+      if (details && details.contact_no) row('聯絡 Contact', escapeHtml(details.contact_no));
+      else if (info && info.contactNo) row('聯絡 Contact', escapeHtml(info.contactNo));
+      if (details && details.height_limit_m) row('高度限制 Height', escapeHtml(String(details.height_limit_m)));
+      else if (info && info.height && info.height > 0) row('高度限制 Height', info.height + 'm');
+      if (details && details.opening_status) row('狀態 Status', escapeHtml(details.opening_status));
+      else if (info && info.opening_status) row('狀態 Status', escapeHtml(info.opening_status));
+      if (section.total_spaces) row(section.type === 'ev' ? 'Chargers' : 'Capacity', escapeHtml(getCapacityLabel(section)));
+      if (details && details.website_url) {
+        row('網站 Website', formatLink(details.website_url));
+      } else if (info && info.website_en) {
+        row('網站 Website', formatLink(info.website_en));
+      }
+      const remarkTc = stripHtml((((details && details.remark_tc) || (info && info.remark_tc) || '').replace(/^高度限制[:：]\s*/i, '').trim()));
+      const remarkEn = stripHtml((((details && details.remark_en) || (info && info.remark_en) || '').replace(/^Height Limit:\s*/i, '').trim()));
+      if (remarkTc || remarkEn) {
+        let remarkHtml = '';
+        if (remarkTc) remarkHtml += escapeHtml(remarkTc);
+        if (remarkTc && remarkEn) remarkHtml += '<br>';
+        if (remarkEn) remarkHtml += '<span style="opacity:0.7;font-size:0.9em">' + escapeHtml(remarkEn) + '</span>';
+        row('備註 Remark', remarkHtml);
+      }
+      if (section.type === 'ev' && section.meter_rate_info) {
+        row('EV Mix', formatEvBreakdown(section.meter_rate_info));
+      }
+      if (section.type === 'carpark' && (((details && details.source) === 'datagovhk') || info)) {
+        const liveVacancies = await fetchTdLiveVacancy();
+        const live = liveVacancies.get(getBaseSectionId(section.id));
+        if (live && typeof live.vacancy === 'number' && live.vacancy >= 0) {
+          const suffix = live.last_update ? ' (update: ' + formatSyncTime(live.last_update) + ')' : '';
+          row('Live Vacancy', escapeHtml(String(live.vacancy) + ' spaces' + suffix));
+        }
+      }
     }
 
     detailInfoGrid.innerHTML = html;
+    detailInfo.hidden = !hasInfo;
   }
 
   /* ===== Data Fetching ===== */
@@ -356,6 +529,10 @@
         }
       });
     }
+    const sectionMapUrl = buildCoordinateMapsUrl(section.latitude, section.longitude);
+    if (sectionMapUrl) {
+      detailMeta.innerHTML += buildMapIconHtml(sectionMapUrl, 'Open in Google Maps');
+    }
 
     /* Show loading */
     showDetailView('loading');
@@ -363,17 +540,27 @@
     try {
       const rows = await fetchTypicalWeek(sectionId);
       if (selectedSectionId !== sectionId) return;
+      await renderSectionInfo(section);
       if (!rows || rows.length === 0) {
-        renderTdInfo(getBaseSectionId(sectionId));
-        showDetailView('nodata');
+        if (chart) { chart.destroy(); chart = null; }
+        chartWrap.hidden = true;
+        setDetailNote(section.type === 'metered'
+          ? 'No vacancy history is available yet. Background information is shown below.'
+          : 'No vacancy history is available yet. Basic information is shown below.');
+        showDetailView('content');
         return;
       }
+      chartWrap.hidden = false;
+      setDetailNote('');
       renderChart(rows, section);
-      renderTdInfo(getBaseSectionId(sectionId));
       showDetailView('content');
     } catch (err) {
       console.error('Failed to load data:', err);
-      showDetailView('nodata');
+      await renderSectionInfo(section);
+      if (chart) { chart.destroy(); chart = null; }
+      chartWrap.hidden = true;
+      setDetailNote('Data is temporarily unavailable. Available background information is shown below.');
+      showDetailView('content');
     }
   }
 
@@ -543,7 +730,8 @@
         fetchAllSections(),
         fetchHasDataSet(),
         fetchSyncTime(),
-        fetchTdBasicInfo()
+        fetchTdBasicInfo(),
+        fetchSectionDetails()
       ]);
 
       allSections = sections;

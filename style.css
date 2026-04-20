@@ -503,6 +503,18 @@ body {
   flex-direction: column;
   gap: 0.75rem;
 }
+.detail-info-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.detail-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
 .detail-photo {
   width: min(100%, 500px);
   height: auto;
