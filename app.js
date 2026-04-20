@@ -70,6 +70,17 @@
     return s.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s{2,}/g, ' ').trim();
   }
 
+  function getBaseSectionId(sectionId) {
+    return sectionId && sectionId.startsWith('ev:') ? sectionId.slice(3) : sectionId;
+  }
+
+  function getCapacityLabel(section) {
+    if (!section || !section.total_spaces) return '';
+    return section.type === 'ev'
+      ? section.total_spaces + ' chargers'
+      : section.total_spaces + ' spaces';
+  }
+
   /* ===== TD Basic Info ===== */
   async function fetchTdBasicInfo() {
     try {
@@ -103,12 +114,21 @@
 
     /* Info grid */
     let html = '';
+    const addressTc = stripHtml(info.displayAddress_tc || '');
+    const mapsUrl = addressTc
+      ? 'https://maps.google.com/maps?q=' + encodeURIComponent(addressTc)
+      : '';
     function row(label, value) {
       if (!value || (typeof value === 'string' && !value.trim())) return;
       html += '<span class="info-label">' + escapeHtml(label) + '</span>' +
               '<span class="info-value">' + value + '</span>';
     }
-    row('地址', escapeHtml(info.displayAddress_tc));
+    let addressTcHtml = escapeHtml(addressTc);
+    if (mapsUrl) {
+      addressTcHtml += '<a class="map-icon-link" href="' + escapeHtml(mapsUrl) +
+        '" target="_blank" rel="noopener" aria-label="Open in Google Maps">🗺️</a>';
+    }
+    row('地址', addressTcHtml);
     row('Address', escapeHtml(info.displayAddress_en));
     if (info.contactNo) row('聯絡 Contact', escapeHtml(info.contactNo));
     if (info.height && info.height > 0) row('高度限制 Height', info.height + 'm');
@@ -147,10 +167,20 @@
   }
 
   async function fetchHasDataSet() {
-    const { data, error } = await sb.from('typical_week').select('section_id')
-      .eq('day_of_week', 0).eq('hour', 0);
-    if (error) throw error;
-    return new Set((data || []).map(r => r.section_id));
+    const ids = new Set();
+    let from = 0;
+    const page = 1000;
+    for (;;) {
+      const { data, error } = await sb.from('typical_week').select('section_id')
+        .range(from, from + page - 1);
+      if (error) throw error;
+      (data || []).forEach(r => {
+        if (r && r.section_id) ids.add(r.section_id);
+      });
+      if (!data || data.length < page) break;
+      from += page;
+    }
+    return ids;
   }
 
   async function fetchSyncTime() {
@@ -260,7 +290,7 @@
       const distBadge = s.district_en
         ? '<span class="badge badge-district">' + escapeHtml(s.district_en) + '</span>' : '';
       const spacesBadge = s.total_spaces
-        ? '<span class="badge badge-spaces">' + s.total_spaces + ' spaces</span>' : '';
+        ? '<span class="badge badge-spaces">' + escapeHtml(getCapacityLabel(s)) + '</span>' : '';
       const noDataBadge = !hasDataSet.has(s.id)
         ? '<span class="badge badge-nodata">No data</span>' : '';
 
@@ -309,7 +339,22 @@
         (section.district_tc ? ' ' + escapeHtml(section.district_tc) : '') + '</span>';
     }
     if (section.total_spaces) {
-      detailMeta.innerHTML += '<span class="badge badge-spaces">' + section.total_spaces + ' spaces</span>';
+      detailMeta.innerHTML += '<span class="badge badge-spaces">' + escapeHtml(getCapacityLabel(section)) + '</span>';
+    }
+    if (section.type === 'ev' && section.meter_rate_info) {
+      const evInfo = section.meter_rate_info;
+      [
+        ['Standard', evInfo.standard],
+        ['Medium', evInfo.medium],
+        ['Fast', evInfo.fast],
+        ['Superfast', evInfo.superfast],
+        ['Other', evInfo.other]
+      ].forEach(([label, count]) => {
+        if (count > 0) {
+          detailMeta.innerHTML += '<span class="badge badge-district">' +
+            escapeHtml(label + ': ' + count) + '</span>';
+        }
+      });
     }
 
     /* Show loading */
@@ -319,12 +364,12 @@
       const rows = await fetchTypicalWeek(sectionId);
       if (selectedSectionId !== sectionId) return;
       if (!rows || rows.length === 0) {
-        renderTdInfo(sectionId);
+        renderTdInfo(getBaseSectionId(sectionId));
         showDetailView('nodata');
         return;
       }
       renderChart(rows, section);
-      renderTdInfo(sectionId);
+      renderTdInfo(getBaseSectionId(sectionId));
       showDetailView('content');
     } catch (err) {
       console.error('Failed to load data:', err);
@@ -346,6 +391,9 @@
     const sunday = getDayData(rows, 6);
 
     const labels = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0') + ':00');
+
+    const metricLabel = section && section.type === 'ev' ? 'available' : 'vacant';
+    const totalLabel = section && section.type === 'ev' ? 'chargers' : 'total';
 
     const datasets = [
       {
@@ -401,7 +449,7 @@
                 const vacancy = ctx.parsed.y != null ? ctx.parsed.y.toFixed(1) : '—';
                 const total = meta ? meta.avg_total.toFixed(1) : '—';
                 const occ = meta ? (meta.avg_occupancy_rate * 100).toFixed(1) + '%' : '—';
-                return ds.label + ': ' + vacancy + ' vacant / ' + total + ' total (' + occ + ' occ.)';
+                return ds.label + ': ' + vacancy + ' ' + metricLabel + ' / ' + total + ' ' + totalLabel + ' (' + occ + ' rate)';
               }
             }
           }
@@ -413,7 +461,12 @@
           },
           y: {
             beginAtZero: true,
-            title: { display: true, text: 'Avg Vacancy', color: textColor, font: { family: "'Urbanist', sans-serif", size: 12, weight: '600' } },
+            title: {
+              display: true,
+              text: section && section.type === 'ev' ? 'Avg Available Chargers' : 'Avg Vacancy',
+              color: textColor,
+              font: { family: "'Urbanist', sans-serif", size: 12, weight: '600' }
+            },
             ticks: { color: textColor, font: { family: "'Urbanist', sans-serif", size: 11 } },
             grid: { color: gridColor }
           }
@@ -449,10 +502,12 @@
       tab.classList.add('active');
       tab.setAttribute('aria-selected', 'true');
       selectedType = tab.dataset.type;
+      selectedSectionId = null;
       selectedDistrict = '';
       districtSelect.value = '';
       populateDistricts();
       applyFilters();
+      showDetailView('placeholder');
     });
   });
 
