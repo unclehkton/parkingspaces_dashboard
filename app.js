@@ -466,13 +466,18 @@
         ? '<span class="badge badge-spaces">' + escapeHtml(getCapacityLabel(s)) + '</span>' : '';
       const noDataBadge = !hasDataSet.has(s.id)
         ? '<span class="badge badge-nodata">No data</span>' : '';
+      const liveVacancy = selectedType === 'carpark' ? tdLiveVacancyMap.get(getBaseSectionId(s.id)) : null;
+      const liveVacancyHtml = liveVacancy && typeof liveVacancy.vacancy === 'number' && liveVacancy.vacancy >= 0
+        ? '<div class="section-live"><div class="section-live-value">' + escapeHtml(String(liveVacancy.vacancy)) + '</div><div class="section-live-label">live</div></div>'
+        : '';
 
       li.innerHTML =
         '<div class="section-item-body">' +
           '<div class="section-name-tc">' + escapeHtml(s.name_tc) + '</div>' +
           '<div class="section-name-en">' + escapeHtml(s.name_en) + '</div>' +
           '<div class="section-badges">' + distBadge + spacesBadge + noDataBadge + '</div>' +
-        '</div>';
+        '</div>' +
+        liveVacancyHtml;
 
       li.addEventListener('click', () => selectSection(s.id));
       frag.appendChild(li);
@@ -731,6 +736,7 @@
         fetchHasDataSet(),
         fetchSyncTime(),
         fetchTdBasicInfo(),
+        fetchTdLiveVacancy(),
         fetchSectionDetails()
       ]);
 

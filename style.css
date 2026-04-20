@@ -292,6 +292,28 @@ body {
 }
 
 .section-item-body { flex: 1; min-width: 0; }
+.section-live {
+  margin-left: auto;
+  min-width: 3.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  text-align: right;
+}
+.section-live-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent);
+}
+.section-live-label {
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 .section-name-tc {
   font-family: var(--font-tc);
   font-size: 0.88rem;
