@@ -9,9 +9,9 @@
   const TD_VACANCY_URL = 'https://resource.data.one.gov.hk/td/carpark/vacancy_all.json';
   const EPD_EV_URL = 'https://ev-charger.epd.gov.hk/resource/ev_charger_avail/evca_ver_1_0.json';
   const TD_METERED_OCCUPANCY_URL = 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv';
-  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=15';
-  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=15';
-  const LOCAL_EV_LIVE_URL = './ev-live.json?v=15';
+  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=16';
+  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=16';
+  const LOCAL_EV_LIVE_URL = './ev-live.json?v=16';
 
   /* ===== Supabase Client ===== */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -438,7 +438,15 @@
     function storeEntries(entries) {
       evLiveEntries = entries;
       evLiveEntries.forEach((entry) => {
-        if (entry.base_section_id) evLiveSectionMap.set(entry.base_section_id, entry);
+        if (entry.base_section_id) {
+          evLiveSectionMap.set(entry.base_section_id, entry);
+          evLiveSectionMap.set('ev:' + String(entry.base_section_id), entry);
+        }
+        if (entry.raw_carpark_id) {
+          evLiveSectionMap.set(String(entry.raw_carpark_id), entry);
+          evLiveSectionMap.set('ev:' + String(entry.raw_carpark_id), entry);
+        }
+        if (entry.raw_id) evLiveSectionMap.set(String(entry.raw_id), entry);
       });
       return evLiveEntries;
     }
@@ -783,7 +791,7 @@
   }
 
   async function pullPriorityRows(maxRows) {
-    if (selectedType !== 'carpark' || !prioritySections.length || maxRows <= 0) return [];
+    if (!prioritySections.length || maxRows <= 0) return [];
     const rows = prioritySections.slice(nextPriorityIndex, nextPriorityIndex + maxRows);
     nextPriorityIndex += rows.length;
     return rows;
@@ -812,25 +820,43 @@
     standardSectionBuffer = [];
     nextStandardOffset = 0;
     standardSectionsDone = false;
-    if (selectedType !== 'carpark') return;
-
-    await tdLiveVacancyPromise;
-    const liveIds = Array.from(tdLiveVacancyMap.entries())
-      .filter(([, value]) => value && typeof value.vacancy === 'number' && value.vacancy >= 0)
-      .map(([sectionId]) => sectionId);
-    if (!liveIds.length) return;
-
-    const liveSections = await fetchSectionsByIds(liveIds);
     const priorityPoolLimit = LIST_PAGE_SIZE * 2;
-    for (let index = 0; index < liveSections.length && prioritySections.length < priorityPoolLimit; index += 50) {
-      const chunk = liveSections.slice(index, index + 50);
-      const dataIds = await fetchHasDataForIds(chunk.map((section) => section.id));
-      chunk.forEach((section) => {
-        if (dataIds.has(section.id)) {
-          hasDataSet.add(section.id);
-          prioritySections.push(section);
-        }
-      });
+    if (selectedType === 'carpark') {
+      await tdLiveVacancyPromise;
+      const liveIds = Array.from(tdLiveVacancyMap.entries())
+        .filter(([, value]) => value && typeof value.vacancy === 'number' && value.vacancy >= 0)
+        .map(([sectionId]) => sectionId);
+      if (!liveIds.length) return;
+
+      const liveSections = await fetchSectionsByIds(liveIds);
+      for (let index = 0; index < liveSections.length && prioritySections.length < priorityPoolLimit; index += 50) {
+        const chunk = liveSections.slice(index, index + 50);
+        const dataIds = await fetchHasDataForIds(chunk.map((section) => section.id));
+        chunk.forEach((section) => {
+          if (dataIds.has(section.id)) {
+            hasDataSet.add(section.id);
+            prioritySections.push(section);
+          }
+        });
+      }
+      return;
+    }
+
+    if (selectedType === 'ev') {
+      await evLiveDataPromise;
+      const liveIds = Array.from(new Set(
+        evLiveEntries.flatMap((entry) => {
+          if (typeof entry.available !== 'number' || entry.available < 0) return [];
+          const ids = [];
+          if (entry.base_section_id) ids.push('ev:' + entry.base_section_id);
+          if (entry.raw_carpark_id) ids.push('ev:' + entry.raw_carpark_id);
+          else if (entry.raw_id) ids.push('ev:' + entry.raw_id);
+          return ids;
+        }).filter(Boolean)
+      ));
+      if (!liveIds.length) return;
+      const liveSections = await fetchSectionsByIds(liveIds);
+      prioritySections = liveSections.slice(0, priorityPoolLimit);
     }
   }
 
