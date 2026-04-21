@@ -9,9 +9,9 @@
   const TD_VACANCY_URL = 'https://resource.data.one.gov.hk/td/carpark/vacancy_all.json';
   const EPD_EV_URL = 'https://ev-charger.epd.gov.hk/resource/ev_charger_avail/evca_ver_1_0.json';
   const TD_METERED_OCCUPANCY_URL = 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv';
-  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=16';
-  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=16';
-  const LOCAL_EV_LIVE_URL = './ev-live.json?v=16';
+  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=17';
+  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=17';
+  const LOCAL_EV_LIVE_URL = './ev-live.json?v=17';
 
   /* ===== Supabase Client ===== */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -856,7 +856,16 @@
       ));
       if (!liveIds.length) return;
       const liveSections = await fetchSectionsByIds(liveIds);
-      prioritySections = liveSections.slice(0, priorityPoolLimit);
+      for (let index = 0; index < liveSections.length && prioritySections.length < priorityPoolLimit; index += 50) {
+        const chunk = liveSections.slice(index, index + 50);
+        const dataIds = await fetchHasDataForIds(chunk.map((section) => section.id));
+        chunk.forEach((section) => {
+          if (dataIds.has(section.id)) {
+            hasDataSet.add(section.id);
+            prioritySections.push(section);
+          }
+        });
+      }
     }
   }
 
