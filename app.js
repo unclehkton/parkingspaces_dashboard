@@ -113,9 +113,9 @@
   function formatSyncTime(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const pad = (n) => String(n).padStart(2, '0');
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
-      ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    return d.getDate() + monthNames[d.getMonth()] + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
   function escapeHtml(s) {
