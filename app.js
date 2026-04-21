@@ -9,9 +9,9 @@
   const TD_VACANCY_URL = 'https://resource.data.one.gov.hk/td/carpark/vacancy_all.json';
   const EPD_EV_URL = 'https://ev-charger.epd.gov.hk/resource/ev_charger_avail/evca_ver_1_0.json';
   const TD_METERED_OCCUPANCY_URL = 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv';
-  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=13';
-  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=13';
-  const LOCAL_EV_LIVE_URL = './ev-live.json?v=13';
+  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=14';
+  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=14';
+  const LOCAL_EV_LIVE_URL = './ev-live.json?v=14';
 
   /* ===== Supabase Client ===== */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -36,6 +36,38 @@
   let searchTimer = null;
   let evLiveEntries = [];
   let meteredLivePromise = null;
+  let tdBasicInfoPromise = null;
+  let tdLiveVacancyPromise = null;
+  let sectionDetailsPromise = null;
+  let localCarparkDetailsPromise = null;
+  let evLiveDataPromise = null;
+  let totalSectionCount = 0;
+  let loadedSectionCount = 0;
+  let nextSectionOffset = 0;
+  let hasMoreSections = false;
+  let isLoadingSections = false;
+  let listRequestToken = 0;
+  const LIST_PAGE_SIZE = 20;
+  const DISTRICT_OPTIONS = [
+    ['Central and Western', '中西區'],
+    ['Eastern', '東區'],
+    ['Islands', '離島'],
+    ['Kowloon City', '九龍城'],
+    ['Kwai Tsing', '葵青'],
+    ['Kwun Tong', '觀塘'],
+    ['North', '北區'],
+    ['Sai Kung', '西貢'],
+    ['Sha Tin', '沙田'],
+    ['Sham Shui Po', '深水埗'],
+    ['Southern', '南區'],
+    ['Tai Po', '大埔'],
+    ['Tsuen Wan', '荃灣'],
+    ['Tuen Mun', '屯門'],
+    ['Wan Chai', '灣仔'],
+    ['Wong Tai Sin', '黃大仙'],
+    ['Yau Tsim Mong', '油尖旺'],
+    ['Yuen Long', '元朗']
+  ];
 
   /* ===== DOM References ===== */
   const $ = (sel) => document.querySelector(sel);
@@ -522,6 +554,15 @@
   }
 
   async function renderSectionInfo(section) {
+    await Promise.all([
+      tdBasicInfoPromise,
+      sectionDetailsPromise,
+      localCarparkDetailsPromise,
+      evLiveDataPromise,
+      section.type === 'metered' ? ensureMeteredLiveVacancy() : Promise.resolve(),
+      section.type === 'carpark' ? tdLiveVacancyPromise : Promise.resolve()
+    ]);
+
     const details = getSectionDetails(section.id);
     const info = tdInfoMap.get(getBaseSectionId(section.id));
     const liveEv = getEvLiveEntry(section.id);
@@ -637,38 +678,6 @@
   }
 
   /* ===== Data Fetching ===== */
-  async function fetchAllSections() {
-    let all = [];
-    let from = 0;
-    const page = 1000;
-    for (;;) {
-      const { data, error } = await sb.from('sections').select('*')
-        .range(from, from + page - 1).order('name_en');
-      if (error) throw error;
-      if (data) all = all.concat(data);
-      if (!data || data.length < page) break;
-      from += page;
-    }
-    return all;
-  }
-
-  async function fetchHasDataSet() {
-    const ids = new Set();
-    let from = 0;
-    const page = 1000;
-    for (;;) {
-      const { data, error } = await sb.from('typical_week').select('section_id')
-        .range(from, from + page - 1);
-      if (error) throw error;
-      (data || []).forEach(r => {
-        if (r && r.section_id) ids.add(r.section_id);
-      });
-      if (!data || data.length < page) break;
-      from += page;
-    }
-    return ids;
-  }
-
   async function fetchSyncTime() {
     const { data, error } = await sb.from('sync_log').select('completed_at')
       .order('completed_at', { ascending: false }).limit(1);
@@ -684,6 +693,38 @@
     const data = resp.data || [];
     dataCache.set(sectionId, data || []);
     return data || [];
+  }
+
+  function buildSectionsQuery(includeCount) {
+    let query = includeCount
+      ? sb.from('sections').select('*', { count: 'exact' })
+      : sb.from('sections').select('*');
+    query = query.eq('type', selectedType).order('name_en');
+    if (selectedDistrict) query = query.eq('district_en', selectedDistrict);
+    if (searchTerm) {
+      const term = searchTerm.replace(/,/g, '\\,');
+      query = query.or('name_en.ilike.%' + term + '%,name_tc.ilike.%' + term + '%');
+    }
+    return query;
+  }
+
+  async function fetchHasDataForIds(sectionIds) {
+    if (!sectionIds.length) return new Set();
+    const ids = new Set();
+    let from = 0;
+    const page = 1000;
+    for (;;) {
+      const { data, error } = await sb.from('typical_week').select('section_id')
+        .in('section_id', sectionIds)
+        .range(from, from + page - 1);
+      if (error) throw error;
+      (data || []).forEach((row) => {
+        if (row && row.section_id) ids.add(row.section_id);
+      });
+      if (!data || data.length < page) break;
+      from += page;
+    }
+    return ids;
   }
 
   /* ===== Weekday Aggregation ===== */
@@ -715,49 +756,94 @@
   }
 
   /* ===== Filtering & Sorting ===== */
-  function applyFilters() {
-    const term = searchTerm.toLowerCase();
-    filteredSections = allSections.filter(s => {
-      if (s.type !== selectedType) return false;
-      if (selectedDistrict && s.district_en !== selectedDistrict) return false;
-      if (term) {
-        const haystack = ((s.name_en || '') + ' ' + (s.name_tc || '')).toLowerCase();
-        if (!haystack.includes(term)) return false;
-      }
-      return true;
-    });
-
-    filteredSections.sort((a, b) => {
-      const aHas = hasDataSet.has(a.id) ? 0 : 1;
-      const bHas = hasDataSet.has(b.id) ? 0 : 1;
-      if (aHas !== bHas) return aHas - bHas;
-      return (a.name_en || '').localeCompare(b.name_en || '');
-    });
-
-    renderList();
-    updateResultsCount();
-  }
-
   function updateResultsCount() {
-    resultsCount.textContent = filteredSections.length + ' section' + (filteredSections.length !== 1 ? 's' : '');
+    if (!totalSectionCount && !loadedSectionCount) {
+      resultsCount.textContent = '0 sections';
+      return;
+    }
+    if (loadedSectionCount < totalSectionCount) {
+      resultsCount.textContent = 'Showing ' + loadedSectionCount + ' of ' + totalSectionCount + ' sections';
+      return;
+    }
+    resultsCount.textContent = totalSectionCount + ' section' + (totalSectionCount !== 1 ? 's' : '');
   }
 
   /* ===== District Dropdown ===== */
   function populateDistricts() {
-    const districts = new Set();
-    allSections.forEach(s => {
-      if (s.type === selectedType && s.district_en) districts.add(s.district_en);
-    });
-    const sorted = Array.from(districts).sort();
-    districtSelect.innerHTML = '<option value="">All Districts 全部地區</option>';
-    sorted.forEach(d => {
-      const sec = allSections.find(s => s.type === selectedType && s.district_en === d);
-      const label = d + (sec && sec.district_tc ? ' ' + sec.district_tc : '');
+    districtSelect.innerHTML = '<option value=\"\">All Districts 全部地區</option>';
+    DISTRICT_OPTIONS.forEach(([districtEn, districtTc]) => {
       const opt = document.createElement('option');
-      opt.value = d;
-      opt.textContent = label;
+      opt.value = districtEn;
+      opt.textContent = districtEn + ' ' + districtTc;
       districtSelect.appendChild(opt);
     });
+    districtSelect.value = selectedDistrict;
+  }
+
+  async function loadSectionPage(offset, includeCount) {
+    if (isLoadingSections) return;
+    isLoadingSections = true;
+    const token = listRequestToken;
+    try {
+      const query = buildSectionsQuery(includeCount).range(offset, offset + LIST_PAGE_SIZE - 1);
+      const resp = await query;
+      if (token !== listRequestToken) return;
+      if (resp.error) throw resp.error;
+
+      const rows = resp.data || [];
+      const pageHasData = await fetchHasDataForIds(rows.map((row) => row.id));
+      if (token !== listRequestToken) return;
+
+      if (includeCount) totalSectionCount = resp.count || 0;
+      rows.forEach((row) => {
+        if (!allSections.some((section) => section.id === row.id)) allSections.push(row);
+      });
+      filteredSections = allSections.slice();
+      pageHasData.forEach((id) => hasDataSet.add(id));
+      loadedSectionCount = filteredSections.length;
+      nextSectionOffset = loadedSectionCount;
+      hasMoreSections = loadedSectionCount < totalSectionCount;
+      renderList();
+      updateResultsCount();
+    } catch (err) {
+      if (token !== listRequestToken) return;
+      console.error('Failed to load section list:', err);
+      sectionList.innerHTML = '';
+      filteredSections = [];
+      allSections = [];
+      totalSectionCount = 0;
+      loadedSectionCount = 0;
+      hasMoreSections = false;
+      resultsCount.textContent = 'Failed to load sections';
+    } finally {
+      if (token === listRequestToken) {
+        isLoadingSections = false;
+        if (hasMoreSections && sectionList.scrollHeight <= sectionList.clientHeight + 24) {
+          setTimeout(() => { loadMoreSections(); }, 0);
+        }
+      }
+    }
+  }
+
+  async function refreshSectionList() {
+    listRequestToken += 1;
+    allSections = [];
+    filteredSections = [];
+    hasDataSet = new Set();
+    totalSectionCount = 0;
+    loadedSectionCount = 0;
+    nextSectionOffset = 0;
+    hasMoreSections = false;
+    selectedSectionId = null;
+    renderList();
+    resultsCount.textContent = 'Loading...';
+    showDetailView('placeholder');
+    await loadSectionPage(0, true);
+  }
+
+  async function loadMoreSections() {
+    if (!hasMoreSections || isLoadingSections) return;
+    await loadSectionPage(nextSectionOffset, false);
   }
 
   /* ===== List Rendering ===== */
@@ -1010,22 +1096,22 @@
       tab.classList.add('active');
       tab.setAttribute('aria-selected', 'true');
       selectedType = tab.dataset.type;
-      selectedSectionId = null;
       selectedDistrict = '';
       districtSelect.value = '';
       if (selectedType === 'metered') {
-        await ensureMeteredLiveVacancy();
+        ensureMeteredLiveVacancy().then(() => {
+          if (selectedType === 'metered') renderList();
+        });
       }
       populateDistricts();
-      applyFilters();
-      showDetailView('placeholder');
+      await refreshSectionList();
     });
   });
 
   /* ===== District Select ===== */
-  districtSelect.addEventListener('change', () => {
+  districtSelect.addEventListener('change', async () => {
     selectedDistrict = districtSelect.value;
-    applyFilters();
+    await refreshSectionList();
   });
 
   /* ===== Search ===== */
@@ -1033,8 +1119,14 @@
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       searchTerm = searchInput.value.trim();
-      applyFilters();
+      refreshSectionList();
     }, 300);
+  });
+
+  sectionList.addEventListener('scroll', () => {
+    if (sectionList.scrollTop + sectionList.clientHeight >= sectionList.scrollHeight - 120) {
+      loadMoreSections();
+    }
   });
 
   /* ===== Mobile Back ===== */
@@ -1047,28 +1139,35 @@
   backBtn.addEventListener('click', closeMobileDetail);
   overlayBackdrop.addEventListener('click', closeMobileDetail);
 
+  function kickOffBackgroundLoads() {
+    if (!tdBasicInfoPromise) tdBasicInfoPromise = fetchTdBasicInfo();
+    if (!sectionDetailsPromise) sectionDetailsPromise = fetchSectionDetails();
+    if (!localCarparkDetailsPromise) localCarparkDetailsPromise = fetchLocalCarparkDetails();
+    if (!tdLiveVacancyPromise) {
+      tdLiveVacancyPromise = fetchTdLiveVacancy().then(() => {
+        if (selectedType === 'carpark') renderList();
+      });
+    }
+    if (!evLiveDataPromise) {
+      evLiveDataPromise = fetchEvLiveData().then(() => {
+        if (selectedType === 'carpark' || selectedType === 'ev') renderList();
+      });
+    }
+  }
+
   /* ===== Initialization ===== */
   async function init() {
     try {
-      const [sections, dataSet, syncTime] = await Promise.all([
-        fetchAllSections(),
-        fetchHasDataSet(),
-        fetchSyncTime(),
-        fetchTdBasicInfo(),
-        fetchTdLiveVacancy(),
-        fetchSectionDetails(),
-        fetchLocalCarparkDetails()
-      ]);
-
-      await fetchEvLiveData();
-
-      allSections = mergeLiveEvSections(sections, dataSet);
-      hasDataSet = dataSet;
-
-      syncLabel.textContent = 'Synced: ' + formatSyncTime(syncTime);
-
       populateDistricts();
-      applyFilters();
+      kickOffBackgroundLoads();
+      fetchSyncTime()
+        .then((syncTime) => {
+          syncLabel.textContent = 'Synced: ' + formatSyncTime(syncTime);
+        })
+        .catch(() => {
+          syncLabel.textContent = 'Sync: error';
+        });
+      await refreshSectionList();
       showDetailView('placeholder');
     } catch (err) {
       console.error('Initialization failed:', err);
