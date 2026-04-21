@@ -540,7 +540,8 @@
 
         const header = lines[0].split(',').map((cell) => cell.trim());
         const spaceIndex = header.indexOf('ParkingSpaceId');
-        const meterIndex = header.indexOf('MeterStatus');
+        let meterIndex = header.indexOf('ParkingMeterStatus');
+        if (meterIndex === -1) meterIndex = header.indexOf('MeterStatus');
         const occupancyIndex = header.indexOf('OccupancyStatus');
         if (spaceIndex === -1 || meterIndex === -1 || occupancyIndex === -1) {
           throw new Error('Unexpected occupancy CSV header');
