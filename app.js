@@ -211,6 +211,35 @@
     return (value == null ? '' : String(value)).trim().toLowerCase();
   }
 
+  function canonicalDistrictName(value) {
+    const normalized = normalizeKey(value);
+    if (!normalized) return '';
+    const match = DISTRICT_OPTIONS.find(([districtEn]) => normalizeKey(districtEn) === normalized);
+    return match ? match[0] : String(value || '').trim();
+  }
+
+  function matchesSelectedDistrict(value) {
+    if (!selectedDistrict) return true;
+    return canonicalDistrictName(value) === canonicalDistrictName(selectedDistrict);
+  }
+
+  function getDistrictFilterValues() {
+    if (!selectedDistrict) return [];
+    const canonical = canonicalDistrictName(selectedDistrict);
+    const values = new Set([selectedDistrict]);
+    if (canonical) {
+      values.add(canonical);
+      values.add(canonical.toUpperCase());
+    }
+    return Array.from(values).filter(Boolean);
+  }
+
+  function applyDistrictFilter(query) {
+    const values = getDistrictFilterValues();
+    if (!values.length) return query;
+    return values.length === 1 ? query.eq('district_en', values[0]) : query.in('district_en', values);
+  }
+
   function toNumberOrNull(value) {
     const num = Number(value);
     return Number.isFinite(num) ? num : null;
@@ -759,7 +788,7 @@
   }
 
   function matchesSectionFilters(section) {
-    if (selectedDistrict && section.district_en !== selectedDistrict) return false;
+    if (!matchesSelectedDistrict(section.district_en)) return false;
     if (!searchTerm) return true;
     const normalizedTerm = searchTerm.toLowerCase();
     const haystack = ((section.name_en || '') + ' ' + (section.name_tc || '')).toLowerCase();
@@ -828,7 +857,7 @@
       ? sb.from('sections').select('*', { count: 'exact' })
       : sb.from('sections').select('*');
     query = query.eq('type', selectedType).order('name_en');
-    if (selectedDistrict) query = query.eq('district_en', selectedDistrict);
+    query = applyDistrictFilter(query);
     if (searchTerm) {
       const term = searchTerm.replace(/,/g, '\\,');
       query = query.or('name_en.ilike.%' + term + '%,name_tc.ilike.%' + term + '%');
@@ -857,7 +886,7 @@
 
   async function fetchSectionCount() {
     let query = sb.from('sections').select('id', { count: 'exact', head: true }).eq('type', selectedType);
-    if (selectedDistrict) query = query.eq('district_en', selectedDistrict);
+    query = applyDistrictFilter(query);
     if (searchTerm) {
       const term = searchTerm.replace(/,/g, '\\,');
       query = query.or('name_en.ilike.%' + term + '%,name_tc.ilike.%' + term + '%');
@@ -873,7 +902,7 @@
     for (let index = 0; index < sectionIds.length; index += 200) {
       const chunk = sectionIds.slice(index, index + 200);
       let query = sb.from('sections').select('*').eq('type', selectedType).in('id', chunk).order('name_en');
-      if (selectedDistrict) query = query.eq('district_en', selectedDistrict);
+      query = applyDistrictFilter(query);
       if (searchTerm) {
         const term = searchTerm.replace(/,/g, '\\,');
         query = query.or('name_en.ilike.%' + term + '%,name_tc.ilike.%' + term + '%');
