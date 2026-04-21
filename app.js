@@ -9,9 +9,9 @@
   const TD_VACANCY_URL = 'https://resource.data.one.gov.hk/td/carpark/vacancy_all.json';
   const EPD_EV_URL = 'https://ev-charger.epd.gov.hk/resource/ev_charger_avail/evca_ver_1_0.json';
   const TD_METERED_OCCUPANCY_URL = 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv';
-  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=14';
-  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=14';
-  const LOCAL_EV_LIVE_URL = './ev-live.json?v=14';
+  const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=15';
+  const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=15';
+  const LOCAL_EV_LIVE_URL = './ev-live.json?v=15';
 
   /* ===== Supabase Client ===== */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -43,10 +43,14 @@
   let evLiveDataPromise = null;
   let totalSectionCount = 0;
   let loadedSectionCount = 0;
-  let nextSectionOffset = 0;
   let hasMoreSections = false;
   let isLoadingSections = false;
   let listRequestToken = 0;
+  let nextStandardOffset = 0;
+  let standardSectionsDone = false;
+  let prioritySections = [];
+  let nextPriorityIndex = 0;
+  let standardSectionBuffer = [];
   const LIST_PAGE_SIZE = 20;
   const DISTRICT_OPTIONS = [
     ['Central and Western', '中西區'],
@@ -727,6 +731,109 @@
     return ids;
   }
 
+  async function fetchSectionCount() {
+    let query = sb.from('sections').select('id', { count: 'exact', head: true }).eq('type', selectedType);
+    if (selectedDistrict) query = query.eq('district_en', selectedDistrict);
+    if (searchTerm) {
+      const term = searchTerm.replace(/,/g, '\\,');
+      query = query.or('name_en.ilike.%' + term + '%,name_tc.ilike.%' + term + '%');
+    }
+    const { count, error } = await query;
+    if (error) throw error;
+    return count || 0;
+  }
+
+  async function fetchSectionsByIds(sectionIds) {
+    if (!sectionIds.length) return [];
+    const rows = [];
+    for (let index = 0; index < sectionIds.length; index += 200) {
+      const chunk = sectionIds.slice(index, index + 200);
+      let query = sb.from('sections').select('*').eq('type', selectedType).in('id', chunk).order('name_en');
+      if (selectedDistrict) query = query.eq('district_en', selectedDistrict);
+      if (searchTerm) {
+        const term = searchTerm.replace(/,/g, '\\,');
+        query = query.or('name_en.ilike.%' + term + '%,name_tc.ilike.%' + term + '%');
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      rows.push(...(data || []));
+    }
+    rows.sort((a, b) => (a.name_en || '').localeCompare(b.name_en || ''));
+    return rows;
+  }
+
+  async function fetchStandardSectionBatch() {
+    if (standardSectionsDone) return [];
+    const query = buildSectionsQuery(false).range(nextStandardOffset, nextStandardOffset + LIST_PAGE_SIZE - 1);
+    const { data, error } = await query;
+    if (error) throw error;
+    const rows = data || [];
+    nextStandardOffset += rows.length;
+    if (rows.length < LIST_PAGE_SIZE) standardSectionsDone = true;
+    return rows;
+  }
+
+  function appendLoadedRows(rows) {
+    rows.forEach((row) => {
+      if (!allSections.some((section) => section.id === row.id)) allSections.push(row);
+    });
+    filteredSections = allSections.slice();
+    loadedSectionCount = filteredSections.length;
+    hasMoreSections = loadedSectionCount < totalSectionCount;
+  }
+
+  async function pullPriorityRows(maxRows) {
+    if (selectedType !== 'carpark' || !prioritySections.length || maxRows <= 0) return [];
+    const rows = prioritySections.slice(nextPriorityIndex, nextPriorityIndex + maxRows);
+    nextPriorityIndex += rows.length;
+    return rows;
+  }
+
+  async function pullStandardRows(maxRows) {
+    if (maxRows <= 0) return [];
+    while (standardSectionBuffer.length < maxRows && !standardSectionsDone) {
+      const batch = await fetchStandardSectionBatch();
+      if (!batch.length) break;
+      const dataIds = await fetchHasDataForIds(batch.map((row) => row.id));
+      dataIds.forEach((id) => hasDataSet.add(id));
+      batch.forEach((row) => {
+        const alreadyLoaded = allSections.some((section) => section.id === row.id);
+        const alreadyBuffered = standardSectionBuffer.some((section) => section.id === row.id);
+        const isPriorityRow = prioritySections.some((section) => section.id === row.id);
+        if (!alreadyLoaded && !alreadyBuffered && !isPriorityRow) standardSectionBuffer.push(row);
+      });
+    }
+    return standardSectionBuffer.splice(0, maxRows);
+  }
+
+  async function preparePrioritySections() {
+    prioritySections = [];
+    nextPriorityIndex = 0;
+    standardSectionBuffer = [];
+    nextStandardOffset = 0;
+    standardSectionsDone = false;
+    if (selectedType !== 'carpark') return;
+
+    await tdLiveVacancyPromise;
+    const liveIds = Array.from(tdLiveVacancyMap.entries())
+      .filter(([, value]) => value && typeof value.vacancy === 'number' && value.vacancy >= 0)
+      .map(([sectionId]) => sectionId);
+    if (!liveIds.length) return;
+
+    const liveSections = await fetchSectionsByIds(liveIds);
+    const priorityPoolLimit = LIST_PAGE_SIZE * 2;
+    for (let index = 0; index < liveSections.length && prioritySections.length < priorityPoolLimit; index += 50) {
+      const chunk = liveSections.slice(index, index + 50);
+      const dataIds = await fetchHasDataForIds(chunk.map((section) => section.id));
+      chunk.forEach((section) => {
+        if (dataIds.has(section.id)) {
+          hasDataSet.add(section.id);
+          prioritySections.push(section);
+        }
+      });
+    }
+  }
+
   /* ===== Weekday Aggregation ===== */
   function aggWeekday(rows) {
     const map = new Map();
@@ -785,24 +892,22 @@
     isLoadingSections = true;
     const token = listRequestToken;
     try {
-      const query = buildSectionsQuery(includeCount).range(offset, offset + LIST_PAGE_SIZE - 1);
-      const resp = await query;
+      if (includeCount) totalSectionCount = await fetchSectionCount();
       if (token !== listRequestToken) return;
-      if (resp.error) throw resp.error;
-
-      const rows = resp.data || [];
-      const pageHasData = await fetchHasDataForIds(rows.map((row) => row.id));
+      if (includeCount) await preparePrioritySections();
       if (token !== listRequestToken) return;
 
-      if (includeCount) totalSectionCount = resp.count || 0;
-      rows.forEach((row) => {
-        if (!allSections.some((section) => section.id === row.id)) allSections.push(row);
-      });
-      filteredSections = allSections.slice();
-      pageHasData.forEach((id) => hasDataSet.add(id));
-      loadedSectionCount = filteredSections.length;
-      nextSectionOffset = loadedSectionCount;
-      hasMoreSections = loadedSectionCount < totalSectionCount;
+      const priorityRows = await pullPriorityRows(LIST_PAGE_SIZE);
+      if (token !== listRequestToken) return;
+      appendLoadedRows(priorityRows);
+
+      const remainingSlots = LIST_PAGE_SIZE - priorityRows.length;
+      if (remainingSlots > 0) {
+        const standardRows = await pullStandardRows(remainingSlots);
+        if (token !== listRequestToken) return;
+        appendLoadedRows(standardRows);
+      }
+
       renderList();
       updateResultsCount();
     } catch (err) {
@@ -814,6 +919,11 @@
       totalSectionCount = 0;
       loadedSectionCount = 0;
       hasMoreSections = false;
+      prioritySections = [];
+      nextPriorityIndex = 0;
+      standardSectionBuffer = [];
+      nextStandardOffset = 0;
+      standardSectionsDone = false;
       resultsCount.textContent = 'Failed to load sections';
     } finally {
       if (token === listRequestToken) {
@@ -832,8 +942,12 @@
     hasDataSet = new Set();
     totalSectionCount = 0;
     loadedSectionCount = 0;
-    nextSectionOffset = 0;
     hasMoreSections = false;
+    nextStandardOffset = 0;
+    standardSectionsDone = false;
+    prioritySections = [];
+    nextPriorityIndex = 0;
+    standardSectionBuffer = [];
     selectedSectionId = null;
     renderList();
     resultsCount.textContent = 'Loading...';
@@ -843,7 +957,7 @@
 
   async function loadMoreSections() {
     if (!hasMoreSections || isLoadingSections) return;
-    await loadSectionPage(nextSectionOffset, false);
+    await loadSectionPage(loadedSectionCount, false);
   }
 
   /* ===== List Rendering ===== */
