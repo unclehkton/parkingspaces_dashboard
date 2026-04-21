@@ -12,6 +12,8 @@
   const LOCAL_CARPARK_DETAILS_URL = './carpark-details.json?v=17';
   const LOCAL_METERED_SPACE_MAP_URL = './metered-space-map.json?v=17';
   const LOCAL_EV_LIVE_URL = './ev-live.json?v=17';
+  const SNAPSHOT_BUCKET = 'public-snapshots';
+  const SNAPSHOT_MANIFEST_URL = SUPABASE_URL + '/storage/v1/object/public/' + SNAPSHOT_BUCKET + '/manifest.json';
 
   /* ===== Supabase Client ===== */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -51,6 +53,11 @@
   let prioritySections = [];
   let nextPriorityIndex = 0;
   let standardSectionBuffer = [];
+  let snapshotManifest = null;
+  let snapshotManifestPromise = null;
+  const snapshotSectionCache = new Map();
+  let snapshotOrderedSections = [];
+  let listDataSource = 'supabase';
   const LIST_PAGE_SIZE = 20;
   const DISTRICT_OPTIONS = [
     ['Central and Western', '中西區'],
@@ -707,6 +714,114 @@
     return data || [];
   }
 
+  function buildSnapshotPublicUrl(filename) {
+    return SUPABASE_URL + '/storage/v1/object/public/' + SNAPSHOT_BUCKET + '/' + filename;
+  }
+
+  async function fetchJson(url, options) {
+    const response = await fetch(url, options);
+    if (!response.ok) throw new Error('HTTP ' + response.status + ' for ' + url);
+    return response.json();
+  }
+
+  async function fetchSnapshotManifest() {
+    if (snapshotManifest) return snapshotManifest;
+    if (!snapshotManifestPromise) {
+      snapshotManifestPromise = fetchJson(SNAPSHOT_MANIFEST_URL, { cache: 'no-store' })
+        .then((manifest) => {
+          snapshotManifest = manifest || {};
+          return snapshotManifest;
+        })
+        .catch((err) => {
+          snapshotManifestPromise = null;
+          throw err;
+        });
+    }
+    return snapshotManifestPromise;
+  }
+
+  async function fetchSnapshotSections(sectionType) {
+    if (snapshotSectionCache.has(sectionType)) return snapshotSectionCache.get(sectionType);
+    const manifest = await fetchSnapshotManifest();
+    const snapshotInfo = manifest && manifest.snapshots ? manifest.snapshots[sectionType] : null;
+    if (!snapshotInfo || !snapshotInfo.filename) {
+      throw new Error('Snapshot manifest is missing the ' + sectionType + ' entry');
+    }
+    const cacheToken = encodeURIComponent(snapshotInfo.generated_at || manifest.generated_at || manifest.date || '');
+    const snapshotUrl = (snapshotInfo.public_url || buildSnapshotPublicUrl(snapshotInfo.filename)) +
+      (cacheToken ? '?v=' + cacheToken : '');
+    const data = await fetchJson(snapshotUrl, { cache: 'default' });
+    const rows = Array.isArray(data) ? data : (Array.isArray(data && data.sections) ? data.sections : null);
+    if (!rows) throw new Error('Snapshot payload for ' + sectionType + ' is invalid');
+    snapshotSectionCache.set(sectionType, rows);
+    return rows;
+  }
+
+  function matchesSectionFilters(section) {
+    if (selectedDistrict && section.district_en !== selectedDistrict) return false;
+    if (!searchTerm) return true;
+    const normalizedTerm = searchTerm.toLowerCase();
+    const haystack = ((section.name_en || '') + ' ' + (section.name_tc || '')).toLowerCase();
+    return haystack.indexOf(normalizedTerm) !== -1;
+  }
+
+  function sortSectionsByName(rows) {
+    return rows.slice().sort((a, b) => (a.name_en || '').localeCompare(b.name_en || ''));
+  }
+
+  function getSnapshotPriorityIds(rows) {
+    if (selectedType === 'carpark') {
+      return new Set(
+        rows
+          .filter((row) => {
+            const live = tdLiveVacancyMap.get(row.id);
+            return !!row.has_history && !!live && typeof live.vacancy === 'number' && live.vacancy >= 0;
+          })
+          .map((row) => row.id)
+      );
+    }
+
+    if (selectedType === 'ev') {
+      const liveIds = new Set(
+        evLiveEntries.flatMap((entry) => {
+          if (typeof entry.available !== 'number' || entry.available < 0) return [];
+          const ids = [];
+          if (entry.base_section_id) ids.push('ev:' + entry.base_section_id);
+          if (entry.raw_carpark_id) ids.push('ev:' + entry.raw_carpark_id);
+          else if (entry.raw_id) ids.push('ev:' + entry.raw_id);
+          return ids;
+        }).filter(Boolean)
+      );
+      return new Set(
+        rows
+          .filter((row) => !!row.has_history && liveIds.has(row.id))
+          .map((row) => row.id)
+      );
+    }
+
+    return new Set();
+  }
+
+  async function prepareSnapshotSections() {
+    if (selectedType === 'carpark' && tdLiveVacancyPromise) await tdLiveVacancyPromise;
+    if (selectedType === 'ev' && evLiveDataPromise) await evLiveDataPromise;
+
+    const rows = sortSectionsByName((await fetchSnapshotSections(selectedType)).filter(matchesSectionFilters));
+    const priorityIds = getSnapshotPriorityIds(rows);
+    const priorityRows = [];
+    const standardRows = [];
+
+    hasDataSet = new Set();
+    rows.forEach((row) => {
+      if (row.has_history) hasDataSet.add(row.id);
+      if (priorityIds.has(row.id)) priorityRows.push(row);
+      else standardRows.push(row);
+    });
+
+    snapshotOrderedSections = priorityRows.concat(standardRows);
+    totalSectionCount = snapshotOrderedSections.length;
+  }
+
   function buildSectionsQuery(includeCount) {
     let query = includeCount
       ? sb.from('sections').select('*', { count: 'exact' })
@@ -927,6 +1042,14 @@
     isLoadingSections = true;
     const token = listRequestToken;
     try {
+      if (listDataSource === 'snapshot') {
+        const rows = snapshotOrderedSections.slice(offset, offset + LIST_PAGE_SIZE);
+        appendLoadedRows(rows);
+        renderList();
+        updateResultsCount();
+        return;
+      }
+
       if (includeCount) totalSectionCount = await fetchSectionCount();
       if (token !== listRequestToken) return;
       if (includeCount) await preparePrioritySections();
@@ -972,6 +1095,7 @@
 
   async function refreshSectionList() {
     listRequestToken += 1;
+    listDataSource = 'supabase';
     allSections = [];
     filteredSections = [];
     hasDataSet = new Set();
@@ -983,10 +1107,24 @@
     prioritySections = [];
     nextPriorityIndex = 0;
     standardSectionBuffer = [];
+    snapshotOrderedSections = [];
     selectedSectionId = null;
     renderList();
     resultsCount.textContent = 'Loading...';
     showDetailView('placeholder');
+    try {
+      await prepareSnapshotSections();
+      listDataSource = 'snapshot';
+      await loadSectionPage(0, false);
+      return;
+    } catch (err) {
+      console.warn('Snapshot list unavailable, falling back to direct Supabase queries:', err);
+      hasDataSet = new Set();
+      totalSectionCount = 0;
+      loadedSectionCount = 0;
+      hasMoreSections = false;
+      snapshotOrderedSections = [];
+    }
     await loadSectionPage(0, true);
   }
 
