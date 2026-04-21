@@ -631,16 +631,16 @@ body {
 /* ===== Mobile styles ===== */
 @media (max-width: 767px) {
   :root {
-    --header-h: 94px;
+    --header-h: 78px;
   }
   .header-inner {
-    height: auto;
+    height: 100%;
     min-height: var(--header-h);
-    padding: 0.8rem 1rem 0.65rem;
-    align-items: flex-start;
-    justify-content: center;
-    flex-direction: column;
-    gap: 0.4rem;
+    padding: 0.45rem 1rem 0.4rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.5rem;
   }
   .header-titles {
     display: grid;
@@ -648,24 +648,24 @@ body {
     width: 100%;
   }
   .header-title-tc {
-    font-size: 1.02rem;
+    font-size: 0.98rem;
   }
   .header-title-en {
     display: block;
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     max-width: none;
   }
   .header-sync {
-    width: 100%;
+    justify-self: end;
   }
   .sync-label {
     display: inline-flex;
     align-items: center;
-    padding: 0.12rem 0.55rem;
+    padding: 0.1rem 0.5rem;
     border: 1px solid var(--border);
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.04);
-    font-size: 0.68rem;
+    font-size: 0.64rem;
   }
   .sidebar {
     width: 100%;
