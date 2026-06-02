@@ -359,6 +359,53 @@ body {
   min-height: 540px;
 }
 
+.public-map-badge-wrap {
+  background: transparent;
+  border: 0;
+}
+
+.public-map-badge {
+  min-width: 42px;
+  padding: 0.22rem 0.38rem 0.24rem;
+  border-radius: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.94);
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.18);
+  color: #ffffff;
+  display: grid;
+  justify-items: center;
+  gap: 0.02rem;
+  transform: translate(-50%, -88%);
+}
+
+.public-map-badge--carpark {
+  background: linear-gradient(180deg, #14b8a6, #0f766e);
+}
+
+.public-map-badge--metered {
+  background: linear-gradient(180deg, #f6ad55, #dd6b20);
+}
+
+.public-map-badge--ev {
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+}
+
+.public-map-badge__value {
+  font-family: var(--font-en);
+  font-size: 0.92rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.public-map-badge__label {
+  font-family: var(--font-en);
+  font-size: 0.54rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  opacity: 0.92;
+}
+
 .map-attribution-panel {
   padding: 0.75rem 1rem;
   border-top: 1px solid var(--border);

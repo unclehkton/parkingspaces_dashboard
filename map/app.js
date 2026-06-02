@@ -68,8 +68,8 @@
     carpark: {
       label: 'Carpark',
       labelBilingual: 'Carpark / Parking',
-      color: '#2364aa',
-      fillColor: '#3d8bfd',
+      color: '#0f766e',
+      fillColor: '#0d9488',
       selectors: {
         toggle: ['#toggle-carpark', '#carpark-toggle', '[data-layer-toggle="carpark"]', '[data-hook="toggle-carpark"]'],
         status: ['#layer-status-carpark', '#carpark-layer-status', '[data-layer-status="carpark"]', '[data-hook="layer-status-carpark"]'],
@@ -90,8 +90,8 @@
     ev: {
       label: 'EV',
       labelBilingual: 'EV / Chargers',
-      color: '#157347',
-      fillColor: '#2fbf71',
+      color: '#1d4ed8',
+      fillColor: '#2563eb',
       selectors: {
         toggle: ['#toggle-ev', '#ev-toggle', '[data-layer-toggle="ev"]', '[data-hook="toggle-ev"]'],
         status: ['#layer-status-ev', '#ev-layer-status', '[data-layer-status="ev"]', '[data-hook="layer-status-ev"]'],
@@ -707,8 +707,14 @@
   function buildMarker(row) {
     if (!Number.isFinite(row.latitude) || !Number.isFinite(row.longitude)) return null;
 
-    const style = markerStyle(row);
-    const marker = L.circleMarker([row.latitude, row.longitude], style);
+    const marker = L.marker([row.latitude, row.longitude], {
+      pane: 'pane-' + row.type,
+      icon: L.divIcon({
+        className: 'public-map-badge-wrap',
+        html: buildMarkerBadgeHtml(row),
+        iconSize: null
+      })
+    });
     marker.bindPopup(buildPopupHtml(row), {
       maxWidth: 320,
       className: 'public-map-popup-wrapper'
@@ -724,20 +730,32 @@
     return marker;
   }
 
-  function markerStyle(row) {
-    const meta = TYPE_META[row.type] || TYPE_META.carpark;
-    const radiusBase = row.type === 'metered' ? 6 : (row.type === 'ev' ? 5 : 7);
-    const radius = Math.max(radiusBase, Math.min(radiusBase + 4, radiusBase + Math.round(Math.log(Math.max(1, row.total_spaces || 1)))));
-    const liveRatio = getLiveRatio(row);
-    const fillOpacity = liveRatio == null ? 0.82 : Math.max(0.35, Math.min(0.92, 0.35 + liveRatio * 0.55));
-    return {
-      pane: 'pane-' + row.type,
-      radius: radius,
-      color: meta.color,
-      weight: 1.5,
-      fillColor: meta.fillColor,
-      fillOpacity: fillOpacity
-    };
+  function buildMarkerBadgeHtml(row) {
+    const value = getMarkerBadgeValue(row);
+    const shortLabel = row.type === 'carpark' ? 'P' : (row.type === 'metered' ? 'S' : 'EV');
+    return [
+      '<div class="public-map-badge public-map-badge--', escapeHtml(row.type), '">',
+      '<span class="public-map-badge__value">', escapeHtml(value), '</span>',
+      '<span class="public-map-badge__label">', escapeHtml(shortLabel), '</span>',
+      '</div>'
+    ].join('');
+  }
+
+  function getMarkerBadgeValue(row) {
+    if (row.type === 'carpark') {
+      const live = state.live.carpark.get(normalizeKey(row.id));
+      if (!live || typeof live.vacancy !== 'number' || live.vacancy < 0) return '—';
+      return String(live.vacancy);
+    }
+    if (row.type === 'metered') {
+      const live = state.live.metered.get(normalizeKey(row.id));
+      if (!live || typeof live.vacant !== 'number' || live.vacant < 0) return '—';
+      return String(live.vacant);
+    }
+    if (row.type === 'ev') {
+      return String(typeof row.available === 'number' ? row.available : 0);
+    }
+    return '—';
   }
 
   function buildTooltipText(row) {
