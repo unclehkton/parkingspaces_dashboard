@@ -559,6 +559,44 @@ body {
   font-size: 0.78rem;
   color: var(--text-secondary);
 }
+.detail-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(13, 110, 253, 0.08), rgba(32, 201, 151, 0.08));
+}
+.detail-insights-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.75rem;
+}
+.detail-insight-item {
+  padding: 0.8rem 0.9rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+}
+.detail-insight-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.detail-insight-value {
+  margin-top: 0.25rem;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.detail-insight-meta {
+  margin-top: 0.25rem;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
 .detail-photo {
   width: min(100%, 500px);
   height: auto;

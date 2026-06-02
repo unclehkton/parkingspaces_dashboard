@@ -99,6 +99,9 @@
   const detailPanel = $('#detail-panel');
   const detailInfo = $('#detail-info');
   const detailInfoTitle = $('#detail-info-title');
+  const detailInsights = $('#detail-insights');
+  const detailInsightsTitle = $('#detail-insights-title');
+  const detailInsightsGrid = $('#detail-insights-grid');
   const detailPhoto = $('#detail-photo');
   const detailInfoGrid = $('#detail-info-grid');
   const detailNote = $('#detail-note');
@@ -379,6 +382,102 @@
   function setDetailNote(message) {
     detailNote.textContent = message || '';
     detailNote.hidden = !message;
+  }
+
+  function setDetailInsights(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+      detailInsightsGrid.innerHTML = '';
+      detailInsights.hidden = true;
+      return;
+    }
+
+    detailInsightsTitle.textContent = 'Occupancy Insights';
+    detailInsightsGrid.innerHTML = items.map((item) =>
+      '<div class="detail-insight-item">' +
+        '<div class="detail-insight-label">' + escapeHtml(item.label || '') + '</div>' +
+        '<div class="detail-insight-value">' + escapeHtml(item.value || '—') + '</div>' +
+        '<div class="detail-insight-meta">' + escapeHtml(item.meta || '') + '</div>' +
+      '</div>'
+    ).join('');
+    detailInsights.hidden = false;
+  }
+
+  function formatInsightHour(hour) {
+    if (!Number.isFinite(Number(hour))) return '—';
+    return String(hour).padStart(2, '0') + ':00';
+  }
+
+  function buildPeakInsight(label, slot) {
+    if (!slot || !Number.isFinite(Number(slot.hour))) {
+      return { label: label, value: 'Not enough history', meta: 'Need more observations' };
+    }
+    const vacancy = Number(slot.avg_vacancy);
+    const count = Number(slot.record_count || slot.sample_count || 0);
+    return {
+      label: label,
+      value: formatInsightHour(slot.hour),
+      meta: (Number.isFinite(vacancy) ? vacancy.toFixed(1) : '—') + ' avg vacant | ' + count + ' samples'
+    };
+  }
+
+  function aggregateInsightRows(rows, dayFilter) {
+    const buckets = new Map();
+    rows.forEach((row) => {
+      if (!dayFilter(row.day_of_week)) return;
+      const hour = Number(row.hour);
+      if (!Number.isFinite(hour)) return;
+      const bucket = buckets.get(hour) || { hour: hour, vacancySum: 0, samples: 0, count: 0 };
+      bucket.vacancySum += Number(row.avg_vacancy || 0);
+      bucket.samples += Number(row.record_count || 0);
+      bucket.count += 1;
+      buckets.set(hour, bucket);
+    });
+    return Array.from(buckets.values()).map((bucket) => ({
+      hour: bucket.hour,
+      avg_vacancy: bucket.count ? bucket.vacancySum / bucket.count : 0,
+      record_count: bucket.samples
+    }));
+  }
+
+  function pickBusiestHour(slots) {
+    if (!slots.length) return null;
+    return slots.slice().sort((a, b) => {
+      const vacancyDiff = Number(a.avg_vacancy || 0) - Number(b.avg_vacancy || 0);
+      if (vacancyDiff !== 0) return vacancyDiff;
+      const sampleDiff = Number(b.record_count || 0) - Number(a.record_count || 0);
+      if (sampleDiff !== 0) return sampleDiff;
+      return Number(a.hour || 0) - Number(b.hour || 0);
+    })[0];
+  }
+
+  function computePublicCarparkInsights(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+
+    const weekdaySlots = aggregateInsightRows(rows, (dow) => Number(dow) >= 0 && Number(dow) <= 4);
+    const saturdaySlots = rows.filter((row) => Number(row.day_of_week) === 5);
+    const sundaySlots = rows.filter((row) => Number(row.day_of_week) === 6);
+
+    const weekdayPeak = pickBusiestHour(weekdaySlots);
+    const saturdayPeak = pickBusiestHour(saturdaySlots);
+    const sundayPeak = pickBusiestHour(sundaySlots);
+
+    const now = new Date();
+    const jsDay = now.getDay();
+    const dayGroup = jsDay === 0 ? 6 : jsDay - 1;
+    const currentHour = now.getHours();
+    const allTodayRows = dayGroup <= 4
+      ? weekdaySlots
+      : rows.filter((row) => Number(row.day_of_week) === dayGroup);
+    let todayRows = allTodayRows.filter((row) => Number(row.hour) >= currentHour);
+    if (!todayRows.length) todayRows = allTodayRows;
+    const nextBusy = pickBusiestHour(todayRows);
+
+    return [
+      buildPeakInsight('Weekday busiest hour', weekdayPeak),
+      buildPeakInsight('Saturday busiest hour', saturdayPeak),
+      buildPeakInsight('Sunday / PH busiest hour', sundayPeak),
+      buildPeakInsight('Next likely busy hour today', nextBusy)
+    ];
   }
 
   function formatMeteredVehicleTypes(value) {
@@ -1260,6 +1359,8 @@
       const rows = await fetchTypicalWeek(sectionId);
       if (selectedSectionId !== sectionId) return;
       await renderSectionInfo(section);
+      if (section.type === 'carpark') setDetailInsights(computePublicCarparkInsights(rows));
+      else setDetailInsights([]);
       if (!rows || rows.length === 0) {
         if (chart) { chart.destroy(); chart = null; }
         chartWrap.hidden = true;
@@ -1281,6 +1382,7 @@
     } catch (err) {
       console.error('Failed to load data:', err);
       await renderSectionInfo(section);
+      setDetailInsights([]);
       if (chart) { chart.destroy(); chart = null; }
       chartWrap.hidden = true;
       setDetailNote('Data is temporarily unavailable. Available background information is shown below.');
