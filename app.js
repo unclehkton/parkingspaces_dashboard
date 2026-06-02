@@ -91,6 +91,7 @@
   const resultsCount = $('#results-count');
   const districtSelect = $('#district-select');
   const searchInput = $('#search-input');
+  const mapViewLink = $('#map-view-link');
   const detailPlaceholder = $('#detail-placeholder');
   const detailContent = $('#detail-content');
   const detailLoading = $('#detail-loading');
@@ -121,6 +122,34 @@
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const pad = (n) => String(n).padStart(2, '0');
     return d.getDate() + monthNames[d.getMonth()] + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function formatSyncLabel(iso) {
+    return 'Updated / 更新: ' + formatSyncTime(iso);
+  }
+
+  function formatResultsMessage(loaded, total) {
+    if (!total && !loaded) return '0 places / 0 個地點';
+    if (loaded < total) {
+      return 'Showing ' + loaded + ' of ' + total + ' places / 顯示 ' + loaded + ' / ' + total + ' 個地點';
+    }
+    return total + ' place' + (total !== 1 ? 's' : '') + ' / ' + total + ' 個地點';
+  }
+
+  function buildMapViewHref() {
+    const params = new URLSearchParams();
+    const currentSearch = searchInput ? searchInput.value.trim() : searchTerm;
+    if (selectedType) params.set('type', selectedType);
+    if (selectedDistrict) params.set('district', selectedDistrict);
+    if (currentSearch) params.set('q', currentSearch);
+    if (selectedSectionId) params.set('section', selectedSectionId);
+    const query = params.toString();
+    return './map/' + (query ? '?' + query : '');
+  }
+
+  function updateMapViewLink() {
+    if (!mapViewLink) return;
+    mapViewLink.href = buildMapViewHref();
   }
 
   function escapeHtml(s) {
@@ -1200,15 +1229,7 @@
 
   /* ===== Filtering & Sorting ===== */
   function updateResultsCount() {
-    if (!totalSectionCount && !loadedSectionCount) {
-      resultsCount.textContent = '0 sections';
-      return;
-    }
-    if (loadedSectionCount < totalSectionCount) {
-      resultsCount.textContent = 'Showing ' + loadedSectionCount + ' of ' + totalSectionCount + ' sections';
-      return;
-    }
-    resultsCount.textContent = totalSectionCount + ' section' + (totalSectionCount !== 1 ? 's' : '');
+    resultsCount.textContent = formatResultsMessage(loadedSectionCount, totalSectionCount);
   }
 
   /* ===== District Dropdown ===== */
@@ -1268,7 +1289,7 @@
       standardSectionBuffer = [];
       nextStandardOffset = 0;
       standardSectionsDone = false;
-      resultsCount.textContent = 'Failed to load sections';
+      resultsCount.textContent = 'Unable to load places / 未能載入地點';
     } finally {
       if (token === listRequestToken) {
         isLoadingSections = false;
@@ -1295,8 +1316,9 @@
     standardSectionBuffer = [];
     snapshotOrderedSections = [];
     selectedSectionId = null;
+    updateMapViewLink();
     renderList();
-    resultsCount.textContent = 'Loading...';
+    resultsCount.textContent = 'Loading places / 載入地點...';
     showDetailView('placeholder');
     try {
       await prepareSnapshotSections();
@@ -1370,6 +1392,7 @@
   async function selectSection(sectionId) {
     if (selectedSectionId === sectionId) return;
     selectedSectionId = sectionId;
+    updateMapViewLink();
 
     /* Update list active state */
     sectionList.querySelectorAll('.section-item').forEach(el => {
@@ -1590,6 +1613,7 @@
         });
       }
       populateDistricts();
+      updateMapViewLink();
       await refreshSectionList();
     });
   });
@@ -1597,11 +1621,13 @@
   /* ===== District Select ===== */
   districtSelect.addEventListener('change', async () => {
     selectedDistrict = districtSelect.value;
+    updateMapViewLink();
     await refreshSectionList();
   });
 
   /* ===== Search ===== */
   searchInput.addEventListener('input', () => {
+    updateMapViewLink();
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       searchTerm = searchInput.value.trim();
@@ -1645,19 +1671,20 @@
   async function init() {
     try {
       populateDistricts();
+      updateMapViewLink();
       kickOffBackgroundLoads();
       fetchSyncTime()
         .then((syncTime) => {
-          syncLabel.textContent = 'Synced: ' + formatSyncTime(syncTime);
+          syncLabel.textContent = formatSyncLabel(syncTime);
         })
         .catch(() => {
-          syncLabel.textContent = 'Sync: error';
+          syncLabel.textContent = 'Sync unavailable / 同步狀態未能載入';
         });
       await refreshSectionList();
       showDetailView('placeholder');
     } catch (err) {
       console.error('Initialization failed:', err);
-      syncLabel.textContent = 'Sync: error';
+      syncLabel.textContent = 'Sync unavailable / 同步狀態未能載入';
     }
   }
 

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>香港停車地圖 Hong Kong Parking Map</title>
+  <meta name="description" content="香港停車場、路旁錶位及 EV 充電位地圖。Explore Hong Kong car parks, street parking sections, and EV chargers on a live public map.">
+  <meta name="keywords" content="Hong Kong parking map, car park, street parking, EV charger, 香港, 停車場, 錶位, 電動車充電">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@300;400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="./style.css?v=1">
+</head>
+<body>
+  <div class="accent-bar" aria-hidden="true"></div>
+
+  <div class="map-shell">
+    <header class="map-header" role="banner">
+      <div class="map-header__inner">
+        <div class="map-header__titles">
+          <h1 class="map-header__title-tc">香港停車地圖</h1>
+          <p class="map-header__title-en">Hong Kong Parking Map</p>
+        </div>
+
+        <nav class="view-switch" aria-label="View switch">
+          <a class="view-switch__link" id="list-view-link" href="../index.html">List View</a>
+          <span class="view-switch__link is-active" aria-current="page">Map View</span>
+        </nav>
+      </div>
+    </header>
+
+    <main class="map-layout">
+      <aside class="map-sidebar" aria-label="Map controls">
+        <section class="sidebar-card sidebar-card--compact">
+          <div class="sidebar-eyebrow">Public Parking Explorer</div>
+          <h2 class="sidebar-title">列表進入，地圖延伸<br>Start from the list, explore on the map</h2>
+          <p class="sidebar-copy">顯示停車場、路旁錶位及 EV 充電位。第一版以 section-level 錶位呈現，並優先顯示 live availability。</p>
+          <p class="sidebar-copy sidebar-copy--en">Browse car parks, street parking sections, and EV chargers with live availability where available.</p>
+        </section>
+
+        <section class="sidebar-card">
+          <div class="filter-stack">
+            <label class="field-label" for="map-search">Search 搜尋</label>
+            <input id="map-search" class="text-input" type="search" placeholder="Search by name or district">
+          </div>
+
+          <div class="filter-stack">
+            <label class="field-label" for="map-district">District 地區</label>
+            <select id="map-district" class="select-input">
+              <option value="">All Districts 全部地區</option>
+            </select>
+          </div>
+
+          <div class="filter-stack">
+            <span class="field-label">Layers 圖層</span>
+            <div class="layer-toggles">
+              <label class="layer-toggle">
+                <input id="toggle-carpark" type="checkbox" checked>
+                <span class="layer-swatch layer-swatch--carpark"></span>
+                <span>Car Parks 停車場</span>
+                <strong id="carpark-count" class="layer-count">0</strong>
+              </label>
+              <label class="layer-toggle">
+                <input id="toggle-metered" type="checkbox" checked>
+                <span class="layer-swatch layer-swatch--metered"></span>
+                <span>Street Parking 錶位</span>
+                <strong id="metered-count" class="layer-count">0</strong>
+              </label>
+              <label class="layer-toggle">
+                <input id="toggle-ev" type="checkbox" checked>
+                <span class="layer-swatch layer-swatch--ev"></span>
+                <span>EV Chargers 充電位</span>
+                <strong id="ev-count" class="layer-count">0</strong>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="sidebar-card sidebar-card--stats">
+          <div class="mini-stat">
+            <span class="mini-stat__label">Visible markers</span>
+            <strong id="visible-count" class="mini-stat__value">0</strong>
+          </div>
+          <div class="mini-stat">
+            <span class="mini-stat__label">Map status</span>
+            <strong id="basemap-status" class="mini-stat__value mini-stat__value--status">Loading</strong>
+          </div>
+        </section>
+
+        <section class="sidebar-card">
+          <div class="section-heading">
+            <h3>Visible places 畫面清單</h3>
+            <p id="results-copy" class="section-subcopy">Pan or zoom the map to refresh the list.</p>
+          </div>
+          <div id="map-results" class="map-results" role="list"></div>
+        </section>
+
+        <section class="sidebar-card sidebar-card--legend">
+          <div class="section-heading">
+            <h3>Legend 圖例</h3>
+          </div>
+          <ul class="legend-list">
+            <li><span class="legend-dot legend-dot--carpark"></span> Car Parks 停車場</li>
+            <li><span class="legend-dot legend-dot--metered"></span> Street Parking Sections 路旁錶位區段</li>
+            <li><span class="legend-dot legend-dot--ev"></span> EV Chargers 電動車充電位</li>
+          </ul>
+        </section>
+      </aside>
+
+      <section class="map-stage" aria-label="Map display">
+        <div id="map-canvas" class="map-canvas"></div>
+        <div class="map-attribution-panel">
+          <p>Basemap target: OSM-derived PMTiles. Fallback basemap may be used until the HK PMTiles artifact is published.</p>
+          <p>Attribution: © OpenStreetMap contributors · Map rendered with Leaflet · Basemap generation approach adapted from <a href="https://github.com/anscg/hk-pmtiles-generation" target="_blank" rel="noopener">anscg/hk-pmtiles-generation</a></p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://unpkg.com/protomaps-leaflet@5.0.0/dist/protomaps-leaflet.js"></script>
+  <script type="module" src="./app.js?v=1"></script>
+</body>
+</html>

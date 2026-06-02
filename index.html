@@ -14,7 +14,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <link rel="stylesheet" href="style.css?v=22">
+  <link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
   <div class="accent-bar" aria-hidden="true"></div>
@@ -26,8 +26,20 @@
           <h1 class="header-title-tc">香港停車場空位趨勢</h1>
           <h1 class="header-title-en">Hong Kong Car Parks Vacancy Trend</h1>
         </div>
-        <div class="header-sync" aria-live="polite">
-          <span id="sync-label" class="sync-label">Synced: —</span>
+        <div class="header-actions">
+          <nav class="view-switch" aria-label="View navigation">
+            <a class="view-link is-current" href="./" aria-current="page">
+              <span class="view-link-en">List View</span>
+              <span class="view-link-tc">列表模式</span>
+            </a>
+            <a class="view-link" id="map-view-link" href="./map/">
+              <span class="view-link-en">Map View</span>
+              <span class="view-link-tc">地圖模式</span>
+            </a>
+          </nav>
+          <div class="header-sync" aria-live="polite">
+            <span id="sync-label" class="sync-label">Updated / 更新: —</span>
+          </div>
         </div>
       </div>
     </header>
@@ -48,7 +60,7 @@
           <div class="filter-row">
             <input type="search" id="search-input" class="search-input" placeholder="Search 搜尋..." aria-label="Search sections by name">
           </div>
-          <div class="results-count" id="results-count" aria-live="polite">0 sections</div>
+          <div class="results-count" id="results-count" aria-live="polite">0 places / 0 個地點</div>
         </div>
         <ul class="section-list" id="section-list" role="listbox" aria-label="Parking sections"></ul>
       </aside>
@@ -115,6 +127,6 @@
   <!-- Mobile overlay backdrop -->
   <div class="overlay-backdrop" id="overlay-backdrop" hidden aria-hidden="true"></div>
 
-  <script src="app.js?v=23"></script>
+  <script src="app.js?v=24"></script>
 </body>
 </html>
