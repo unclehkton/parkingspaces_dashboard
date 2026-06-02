@@ -355,6 +355,15 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.section-busiest-hours {
+  margin-top: 0.22rem;
+  font-size: 0.66rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .section-badges {
   display: flex;
   gap: 0.35rem;
