@@ -393,7 +393,7 @@
       return;
     }
 
-    detailInsightsTitle.textContent = '佔用洞察 Occupancy Insights';
+    detailInsightsTitle.textContent = '繁忙時段 Busiest Hours';
     detailInsightsGrid.innerHTML = items.map((item) =>
       '<div class="detail-insight-item">' +
         '<div class="detail-insight-label">' + escapeHtml(item.label || '') + '</div>' +
@@ -411,15 +411,25 @@
     return String(start).padStart(2, '0') + ':00-' + String(end).padStart(2, '0') + ':00';
   }
 
-  function buildPeakInsight(label, slot) {
-    if (!slot || !Number.isFinite(Number(slot.hour))) {
+  function formatHourWindows(slots) {
+    const list = Array.isArray(slots) ? slots : (slots ? [slots] : []);
+    if (!list.length) return '—';
+    return list
+      .filter((slot) => slot && Number.isFinite(Number(slot.hour)))
+      .map((slot) => formatInsightHour(slot.hour))
+      .join(' / ');
+  }
+
+  function buildPeakInsight(label, slots) {
+    const list = Array.isArray(slots) ? slots : (slots ? [slots] : []);
+    if (!list.length || !Number.isFinite(Number(list[0].hour))) {
       return { label: label, value: '資料不足 Not enough history', meta: '需要更多觀測 Need more observations' };
     }
-    const vacancy = Number(slot.avg_vacancy);
-    const count = Number(slot.record_count || slot.sample_count || 0);
+    const vacancy = Number(list[0].avg_vacancy);
+    const count = list.reduce((sum, slot) => sum + Number(slot.record_count || slot.sample_count || 0), 0);
     return {
       label: label,
-      value: formatInsightHour(slot.hour),
+      value: formatHourWindows(list),
       meta: '平均空位 Avg vacant: ' + (Number.isFinite(vacancy) ? vacancy.toFixed(1) : '—') + ' | 樣本 Samples: ' + count
     };
   }
@@ -443,15 +453,19 @@
     }));
   }
 
-  function pickBusiestHour(slots) {
-    if (!slots.length) return null;
-    return slots.slice().sort((a, b) => {
+  function pickBusiestHours(slots, maxCount = 2) {
+    if (!slots.length) return [];
+    const sorted = slots.slice().sort((a, b) => {
       const vacancyDiff = Number(a.avg_vacancy || 0) - Number(b.avg_vacancy || 0);
       if (vacancyDiff !== 0) return vacancyDiff;
       const sampleDiff = Number(b.record_count || 0) - Number(a.record_count || 0);
       if (sampleDiff !== 0) return sampleDiff;
       return Number(a.hour || 0) - Number(b.hour || 0);
-    })[0];
+    });
+    const bestVacancy = Number(sorted[0].avg_vacancy || 0);
+    return sorted
+      .filter((slot) => Math.abs(Number(slot.avg_vacancy || 0) - bestVacancy) < 0.001)
+      .slice(0, maxCount);
   }
 
   function computePublicCarparkInsights(rows) {
@@ -461,9 +475,9 @@
     const saturdaySlots = rows.filter((row) => Number(row.day_of_week) === 5);
     const sundaySlots = rows.filter((row) => Number(row.day_of_week) === 6);
 
-    const weekdayPeak = pickBusiestHour(weekdaySlots);
-    const saturdayPeak = pickBusiestHour(saturdaySlots);
-    const sundayPeak = pickBusiestHour(sundaySlots);
+    const weekdayPeak = pickBusiestHours(weekdaySlots);
+    const saturdayPeak = pickBusiestHours(saturdaySlots);
+    const sundayPeak = pickBusiestHours(sundaySlots);
 
     const now = new Date();
     const jsDay = now.getDay();
@@ -474,20 +488,19 @@
       : rows.filter((row) => Number(row.day_of_week) === dayGroup);
     let todayRows = allTodayRows.filter((row) => Number(row.hour) >= currentHour);
     if (!todayRows.length) todayRows = allTodayRows;
-    const nextBusy = pickBusiestHour(todayRows);
+    const nextBusy = pickBusiestHours(todayRows);
 
     return [
-      buildPeakInsight('平日最繁忙時段 Weekday busiest hours', weekdayPeak),
-      buildPeakInsight('星期六最繁忙時段 Saturday busiest hours', saturdayPeak),
-      buildPeakInsight('星期日及公眾假期最繁忙時段 Sunday / PH busiest hours', sundayPeak),
-      buildPeakInsight('今日下一個繁忙時段 Next likely busy hour today', nextBusy)
+      buildPeakInsight('今日下一個繁忙時段 Next likely busy hour today', nextBusy),
+      buildPeakInsight('平日 Weekdays', weekdayPeak),
+      buildPeakInsight('星期六 Saturdays', saturdayPeak),
+      buildPeakInsight('星期日及公眾假期 Sundays & PH', sundayPeak)
     ];
   }
 
   function getCarparkListBusiestLabel(sectionId) {
-    const slot = listInsightCache.get(sectionId);
-    if (!slot || !Number.isFinite(Number(slot.hour))) return '';
-    return '最繁忙時段 Busiest Hours: ' + String(slot.hour).padStart(2, '0') + ':00';
+    const value = listInsightCache.get(sectionId);
+    return typeof value === 'string' ? value : '';
   }
 
   async function ensureVisibleCarparkListInsights(rows) {
@@ -506,10 +519,9 @@
         try {
           const rows = await fetchTypicalWeek(sectionId);
           const insights = computePublicCarparkInsights(rows);
-          const busiest = insights.length ? (insights[0].value || '') : '';
-          const hourMatch = busiest.match(/^(\d{2}):00/);
-          if (hourMatch) {
-            listInsightCache.set(sectionId, { hour: Number(hourMatch[1]) });
+          const busiest = insights.length > 1 ? (insights[1].value || '') : '';
+          if (busiest && busiest !== '—' && !busiest.includes('資料不足')) {
+            listInsightCache.set(sectionId, busiest);
             shouldRerender = true;
           }
         } catch (_err) {
@@ -1328,8 +1340,13 @@
       const noDataBadge = !hasDataSet.has(s.id)
         ? '<span class="badge badge-nodata">No data</span>' : '';
       const liveVacancyHtml = getListLiveHtml(s);
+      const busiestHoursText = getCarparkListBusiestLabel(s.id);
+      const busiestClass = busiestHoursText.includes(' / ') ? 'section-busiest-value dual' : 'section-busiest-value';
       const busiestHoursHtml = selectedType === 'carpark' && hasDataSet.has(s.id)
-        ? '<div class="section-busiest-hours">' + escapeHtml(getCarparkListBusiestLabel(s.id) || '載入中 Loading busiest hour...') + '</div>'
+        ? '<div class="section-busiest-block">' +
+            '<div class="' + busiestClass + '">' + escapeHtml(busiestHoursText || '載入中 Loading busiest hour...') + '</div>' +
+            '<div class="section-busiest-copy">最繁忙時段<br>Busiest Hours</div>' +
+          '</div>'
         : '';
 
       li.innerHTML =
