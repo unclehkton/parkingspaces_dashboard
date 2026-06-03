@@ -61,6 +61,7 @@
       ev: true
     },
     manifest: null,
+    hasAppliedInitialViewport: false,
     fallbackSearchInput: null,
     fallbackStatus: null,
     fallbackVisibleCount: null,
@@ -658,7 +659,6 @@
       state.layerControl.addTo(state.map);
     }
 
-    fitMapToVisibleData();
   }
 
   function createPanes() {
@@ -846,6 +846,10 @@
 
     updateSummaryHooks();
     renderResults();
+    if (!state.hasAppliedInitialViewport) {
+      fitMapToVisibleData();
+      state.hasAppliedInitialViewport = true;
+    }
     maybeOpenRequestedSection();
   }
 

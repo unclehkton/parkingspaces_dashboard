@@ -28,6 +28,15 @@ test('map app defaults initial load to Yau Tsim Mong when no district filter is 
   assert.match(mapAppJs, /requestedDistrict\s*\|\|\s*DEFAULT_INITIAL_DISTRICT/);
 });
 
+test('initial map viewport is fitted after visible rows are rendered, not before buildMap finishes', () => {
+  const buildMapStart = mapAppJs.indexOf('function buildMap()');
+  const createPanesStart = mapAppJs.indexOf('function createPanes()');
+  const buildMapBlock = mapAppJs.slice(buildMapStart, createPanesStart);
+  assert.match(mapAppJs, /hasAppliedInitialViewport:\s*false/);
+  assert.doesNotMatch(buildMapBlock, /fitMapToVisibleData\(\);/);
+  assert.match(mapAppJs, /if\s*\(!state\.hasAppliedInitialViewport\)\s*{\s*fitMapToVisibleData\(\);[\s\S]*state\.hasAppliedInitialViewport\s*=\s*true;/);
+});
+
 test('pages repo is configured for the parking.pkwor.com custom domain', () => {
   assert.equal(cname.trim(), 'parking.pkwor.com');
 });
