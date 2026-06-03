@@ -6,6 +6,7 @@ import path from 'node:path';
 const repoRoot = process.cwd();
 const mapIndexHtml = fs.readFileSync(path.join(repoRoot, 'parkingspaces_dashboard', 'map', 'index.html'), 'utf8');
 const mapAppJs = fs.readFileSync(path.join(repoRoot, 'parkingspaces_dashboard', 'map', 'app.js'), 'utf8');
+const cname = fs.readFileSync(path.join(repoRoot, 'parkingspaces_dashboard', 'CNAME'), 'utf8');
 
 test('map page loads a dedicated basemap config before bootstrapping the app', () => {
   assert.match(mapIndexHtml, /<script\s+src="\.\/config\.js"><\/script>/);
@@ -20,4 +21,13 @@ test('map app reads HK basemap config, versions the PMTiles URL, and forwards fl
   assert.match(mapAppJs, /pmtilesVersion|generatedAt|cacheBust/i);
   assert.match(mapAppJs, /flavor:\s*state\.config\.pmtilesFlavor/);
   assert.match(mapAppJs, /lang:\s*state\.config\.pmtilesLang/);
+});
+
+test('map app defaults initial load to Yau Tsim Mong when no district filter is requested', () => {
+  assert.match(mapAppJs, /DEFAULT_INITIAL_DISTRICT\s*=\s*'Yau Tsim Mong'/);
+  assert.match(mapAppJs, /requestedDistrict\s*\|\|\s*DEFAULT_INITIAL_DISTRICT/);
+});
+
+test('pages repo is configured for the parking.pkwor.com custom domain', () => {
+  assert.equal(cname.trim(), 'parking.pkwor.com');
 });

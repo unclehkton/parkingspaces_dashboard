@@ -21,6 +21,7 @@
     visibleResultLimit: 60,
     cacheTtlMs: 5 * 60 * 1000
   };
+  const DEFAULT_INITIAL_DISTRICT = 'Yau Tsim Mong';
 
   const state = {
     config: null,
@@ -325,12 +326,12 @@
       });
     }
 
-    state.selectedDistrict = requestedDistrict;
+    state.selectedDistrict = requestedDistrict || DEFAULT_INITIAL_DISTRICT;
     state.searchTerm = normalizeText(requestedSearch);
     state.pendingSectionId = requestedSection;
 
     if (state.hooks.searchInput && requestedSearch) state.hooks.searchInput.value = requestedSearch;
-    if (state.hooks.districtSelect && requestedDistrict) state.hooks.districtSelect.value = requestedDistrict;
+    if (state.hooks.districtSelect) state.hooks.districtSelect.value = state.selectedDistrict;
   }
 
   function syncListViewLink() {
