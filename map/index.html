@@ -110,7 +110,7 @@
       </aside>
 
       <section class="map-stage" aria-label="Map display">
-        <div id="map-canvas" class="map-canvas" data-pmtiles-url="https://unclehkton.github.io/hk-parking-basemap/hong-kong.pmtiles"></div>
+        <div id="map-canvas" class="map-canvas"></div>
         <div class="map-attribution-panel">
           <p>Basemap target: OSM-derived PMTiles served from GitHub Pages. OSM raster is kept only as a fallback.</p>
           <p>Attribution: © OpenStreetMap contributors · Map rendered with Leaflet · Basemap generation approach adapted from <a href="https://github.com/anscg/hk-pmtiles-generation" target="_blank" rel="noopener">anscg/hk-pmtiles-generation</a></p>
@@ -121,6 +121,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://unpkg.com/protomaps-leaflet@5.0.0/dist/protomaps-leaflet.js"></script>
-  <script type="module" src="./app.js?v=1"></script>
+  <script src="./config.js"></script>
+  <script type="module" src="./app.js?v=2"></script>
 </body>
 </html>

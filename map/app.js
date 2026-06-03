@@ -12,6 +12,8 @@
     tdMeteredOccupancyUrl: 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv',
     fallbackTileUrl: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     fallbackAttribution: '&copy; OpenStreetMap contributors',
+    pmtilesFlavor: 'light',
+    pmtilesLang: 'en',
     center: [22.3193, 114.1694],
     zoom: 11,
     minZoom: 10,
@@ -173,7 +175,12 @@
   }
 
   function readRuntimeConfig(root) {
-    const globalConfig = window.PUBLIC_MAP_CONFIG || window.__PUBLIC_MAP_CONFIG__ || {};
+    const globalConfig = Object.assign(
+      {},
+      window.HK_BASEMAP_CONFIG || {},
+      window.PUBLIC_MAP_CONFIG || {},
+      window.__PUBLIC_MAP_CONFIG__ || {}
+    );
     const dataset = root.dataset || {};
     const config = Object.assign({}, DEFAULT_CONFIG, globalConfig);
 
@@ -184,7 +191,28 @@
     if (dataset.center) config.center = parseCenter(dataset.center) || config.center;
     if (dataset.zoom) config.zoom = Number(dataset.zoom) || config.zoom;
     if (dataset.visibleResultLimit) config.visibleResultLimit = Number(dataset.visibleResultLimit) || config.visibleResultLimit;
+    if (config.pmtilesUrl) config.pmtilesUrl = buildVersionedAssetUrl(config.pmtilesUrl, config.pmtilesVersion || config.generatedAt);
     return config;
+  }
+
+  function buildVersionedAssetUrl(url, version) {
+    const source = stringOrEmpty(url);
+    if (!source) return '';
+
+    try {
+      const assetUrl = new URL(source, window.location.href);
+      if (version && !assetUrl.searchParams.has('v')) {
+        assetUrl.searchParams.set('v', sanitizeVersionToken(version));
+      }
+      return assetUrl.toString();
+    } catch (_error) {
+      return source;
+    }
+  }
+
+  function sanitizeVersionToken(value) {
+    const normalized = stringOrEmpty(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return normalized || 'current';
   }
 
   function cacheHooks() {
@@ -649,6 +677,8 @@
           setStatus('Using PMTiles basemap.', 'ready');
           return window.protomapsL.leafletLayer({
             url: pmtilesUrl,
+            flavor: state.config.pmtilesFlavor || 'light',
+            lang: state.config.pmtilesLang || 'en',
             attribution: state.config.pmtilesAttribution || state.config.fallbackAttribution
           });
         }
