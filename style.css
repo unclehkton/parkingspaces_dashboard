@@ -669,26 +669,30 @@ body {
 .detail-insight-item {
   padding: 0.8rem 0.9rem;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.68);
-  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.08);
 }
 .detail-insight-label {
   font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--text-secondary);
+  line-height: 1.35;
 }
 .detail-insight-value {
   margin-top: 0.25rem;
-  font-size: 0.98rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--text-primary);
+  line-height: 1.25;
 }
 .detail-insight-meta {
   margin-top: 0.25rem;
   font-size: 0.74rem;
   color: var(--text-secondary);
+  line-height: 1.35;
 }
 .detail-photo {
   width: min(100%, 500px);
