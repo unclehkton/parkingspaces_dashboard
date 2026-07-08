@@ -1,0 +1,38 @@
+name: AI PR Review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  ai-review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture PR diff
+        run: gh pr diff "$PR_NUMBER" --repo "$REPO" > pr.diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+
+      - name: Post AI PR review comment
+        uses: unclehkton/ai-pr-reviewer@main
+        with:
+          base_url: https://integrate.api.nvidia.com/v1
+          tier1_model: z-ai/glm-5.2
+          tier2_model: minimaxai/minimax-m3
+          tier2_mode: auto
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          PR_DIFF_PATH: pr.diff
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
